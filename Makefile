@@ -2,7 +2,7 @@ PY ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 PORT ?= 8080
 AGENT = PYTHONPATH=agent $(PY) -m musicos_agent --port $(PORT)
 
-.PHONY: help ui ui-dev dev dev-library dev-mpd check image vm deploy test clean
+.PHONY: help ui ui-dev dev dev-library dev-mpd check image vm deploy test fetch usb clean
 
 help:
 	@echo "make ui        build the TV UI (ui/dist)"
@@ -15,6 +15,8 @@ help:
 	@echo "make vm        boot the image in QEMU on the build host"
 	@echo "make deploy    push image to Proxmox and recreate the test VM (PVE_HOST=root@pve)"
 	@echo "make test      sync, build on the build VM, deploy, boot-check, screenshot (.pipeline.env)"
+	@echo "make fetch     download the latest build as out/musicos.img.gz"
+	@echo "make usb DISK=disk4   write out/musicos.img.gz to a USB stick (erases it)"
 
 ui:
 	cd ui && npm ci --no-audit --no-fund && npm run build
@@ -54,6 +56,12 @@ deploy:
 
 test:
 	./scripts/pve-test.sh
+
+fetch:
+	./scripts/fetch-image.sh
+
+usb:
+	./scripts/flash-usb.sh out/musicos.img.gz $(DISK)
 
 clean:
 	cd image && sudo mkosi clean || true

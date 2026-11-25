@@ -56,7 +56,7 @@ export function Home({
   }, [idx, zone])
 
   useEffect(() => {
-    if (current) setAccentFrom(coverUrl(current.file, 96))
+    if (current) setAccentFrom(coverUrl(current.file, 0.05))
   }, [current])
 
   useRemote((k) => {
@@ -166,7 +166,7 @@ export function Home({
                 file={a.file}
                 title={a.album}
                 artist={a.artist}
-                size={360}
+                fraction={0.12}
                 eager={i < COLS * 3}
                 className="size-full rounded-[0.75rem] text-[0.95rem]"
               />

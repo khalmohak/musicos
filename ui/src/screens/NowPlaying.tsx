@@ -23,7 +23,7 @@ export function NowPlaying({
   const song = status?.song
   const [flash, setFlash] = useState<Transport | null>(null)
   useEffect(() => {
-    if (song) setAccentFrom(coverUrl(song.file, 96))
+    if (song) setAccentFrom(coverUrl(song.file, 0.05))
   }, [song?.file])
 
   const press = (k: Transport) => {
@@ -73,7 +73,7 @@ export function NowPlaying({
             file={song.file}
             title={song.album}
             artist={song.artist}
-            size={900}
+            fraction={0.36}
             eager
             className="relative aspect-square w-full rounded-[0.6rem] shadow-[0_2.5rem_5rem_-1rem_rgb(0_0_0/0.85)]"
           />

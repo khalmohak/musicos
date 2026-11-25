@@ -4,14 +4,14 @@ import { coverUrl } from '../lib/api'
 
 /** Album art; albums without art get a quiet, typographic sleeve instead of a broken image. */
 export function Cover({
-  file, title, artist, size = 480, className = '', eager = false,
-}: { file?: string; title: string; artist?: string; size?: number; className?: string; eager?: boolean }) {
+  file, title, artist, fraction = 0.12, className = '', eager = false,
+}: { file?: string; title: string; artist?: string; fraction?: number; className?: string; eager?: boolean }) {
   const [failed, setFailed] = useState(!file)
   return (
     <div className={`relative overflow-hidden bg-[rgb(28_28_32)] ${className}`}>
       {!failed && file ? (
         <img
-          src={coverUrl(file, size)}
+          src={coverUrl(file, fraction)}
           alt=""
           loading={eager ? 'eager' : 'lazy'}
           decoding="async"

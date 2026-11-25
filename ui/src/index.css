@@ -16,8 +16,9 @@
   --mo-bg: 9 9 11;
   --mo-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   color-scheme: dark;
-  /* rem drives everything (Glyph too): ~24px at 1080p, capped for 4K */
-  font-size: clamp(14px, 1.25vw, 30px);
+  /* rem drives everything (Glyph too) and tracks the screen: 24px at 1080p, 48px at 4K,
+     so layouts are identical at any resolution and text stays sharp */
+  font-size: max(14px, 1.25vw);
 }
 
 html,

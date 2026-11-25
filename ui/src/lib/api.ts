@@ -134,7 +134,16 @@ export const api = {
   removeSource: (id: string) => req<{ ok: boolean }>('/api/sources/remove', { id }),
 }
 
-export const coverUrl = (file: string, size = 480) => `/api/art?file=${q(file)}&size=${size}`
+/**
+ * Cover URL sized for how big it is on screen: `fraction` is the cover's width as a share of the
+ * screen width. Sizes snap to steps of 160 px so the agent's cache stays small (4K wall ≈ 480 px,
+ * 4K album view ≈ 1440 px).
+ */
+export function coverUrl(file: string, fraction = 0.12) {
+  const px = window.innerWidth * (window.devicePixelRatio || 1) * fraction
+  const size = Math.min(1600, Math.max(160, Math.ceil(px / 160) * 160))
+  return `/api/art?file=${q(file)}&size=${size}`
+}
 /** Pre-blurred tiny cover for full-screen backdrops: no CSS blur on the device. */
 export const backdropUrl = (file: string) => `/api/art?file=${q(file)}&blur=1`
 

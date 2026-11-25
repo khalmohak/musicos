@@ -12,6 +12,8 @@
 #   BRIDGE     network bridge                  (default vmbr0)
 #   MEMORY     MiB                             (default 2048)
 #   CORES      vCPUs                           (default 2)
+#   DISK_SIZE  grow the disk before first boot, e.g. 12G (tests first-boot root growth)
+#   VGA_RES    virtual screen resolution, e.g. 3840x2160 (default: QEMU's 1280x800)
 #
 # WARNING: destroys any existing VM with id $VMID before recreating it.
 set -euo pipefail
@@ -24,6 +26,8 @@ STORAGE="${STORAGE:-local-lvm}"
 BRIDGE="${BRIDGE:-vmbr0}"
 MEMORY="${MEMORY:-2048}"
 CORES="${CORES:-2}"
+DISK_SIZE="${DISK_SIZE:-}"
+VGA_RES="${VGA_RES:-}"
 IMAGE="out/musicos.raw"
 REMOTE_IMAGE="/var/tmp/musicos.raw"
 
@@ -49,9 +53,9 @@ else
 fi
 
 echo ">> (re)creating VM $VMID"
-ssh "$PVE_HOST" bash -s -- "$VMID" "$STORAGE" "$BRIDGE" "$MEMORY" "$CORES" "$REMOTE_IMAGE" <<'EOF'
+ssh "$PVE_HOST" bash -s -- "$VMID" "$STORAGE" "$BRIDGE" "$MEMORY" "$CORES" "$REMOTE_IMAGE" "${DISK_SIZE:--}" "${VGA_RES:--}" <<'EOF'
 set -euo pipefail
-VMID=$1 STORAGE=$2 BRIDGE=$3 MEMORY=$4 CORES=$5 IMG=$6
+VMID=$1 STORAGE=$2 BRIDGE=$3 MEMORY=$4 CORES=$5 IMG=$6 DISK_SIZE=$7 VGA_RES=$8
 if qm status "$VMID" >/dev/null 2>&1; then
     qm stop "$VMID" --skiplock 1 >/dev/null 2>&1 || true
     qm destroy "$VMID" --purge 1
@@ -64,6 +68,10 @@ qm create "$VMID" --name musicos --ostype l26 --machine q35 --bios ovmf \
     --vga virtio --serial0 socket --agent enabled=1 \
     --audio0 device=ich9-intel-hda,driver=spice \
     --net0 "virtio,bridge=$BRIDGE"
+if [ "$DISK_SIZE" != - ]; then qm resize "$VMID" scsi0 "$DISK_SIZE"; fi
+if [ "$VGA_RES" != - ]; then
+    qm set "$VMID" --args "-global virtio-vga.xres=${VGA_RES%x*} -global virtio-vga.yres=${VGA_RES#*x}" >/dev/null
+fi
 qm start "$VMID"
 rm -f "$IMG"
 echo "VM $VMID started. Console: Proxmox web UI > $VMID > Console (noVNC or SPICE for audio)."

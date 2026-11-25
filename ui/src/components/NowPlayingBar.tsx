@@ -13,7 +13,7 @@ export function NowPlayingBar({ status, focused }: { status: Status | null; focu
         focused ? 'scale-[1.04] bg-white text-[rgb(12_12_14)]' : 'bg-[rgb(26_26_30/0.94)] text-white'
       }`}
     >
-      <img src={coverUrl(song.file, 120)} alt="" className="size-[3.2rem] rounded-[0.6rem] object-cover" />
+      <img src={coverUrl(song.file, 0.04)} alt="" className="size-[3.2rem] rounded-[0.6rem] object-cover" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[0.95rem] font-semibold">{song.title}</div>
         <div className={`truncate text-[0.8rem] ${focused ? 'text-black/55' : 'text-white/55'}`}>{song.artist}</div>

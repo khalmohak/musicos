@@ -15,7 +15,7 @@ export function AlbumView({
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setAccentFrom(coverUrl(album.file, 96))
+    setAccentFrom(coverUrl(album.file, 0.05))
     api.tracks(album).then(setTracks).catch(() => setTracks([]))
   }, [album])
   useEffect(() => {
@@ -52,7 +52,7 @@ export function AlbumView({
             file={album.file}
             title={album.album}
             artist={album.artist}
-            size={900}
+            fraction={0.36}
             eager
             className="aspect-square w-full rounded-[1rem] shadow-[0_2.5rem_5rem_-1rem_rgb(0_0_0/0.8)]"
           />

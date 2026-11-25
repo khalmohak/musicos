@@ -39,7 +39,8 @@ if [ -z "${SKIP_BUILD:-}" ]; then
 fi
 
 step "deploy VM $VMID"
-PVE_HOST="$PVE_HOST" BUILD_HOST="$BUILD_HOST" VMID="$VMID" CORES="${CORES:-2}" MEMORY="${MEMORY:-2048}" ./scripts/proxmox-deploy.sh \
+PVE_HOST="$PVE_HOST" BUILD_HOST="$BUILD_HOST" VMID="$VMID" CORES="${CORES:-2}" MEMORY="${MEMORY:-2048}" \
+    DISK_SIZE="${DISK_SIZE:-}" VGA_RES="${VGA_RES:-}" ./scripts/proxmox-deploy.sh \
     | grep -vE '^(transferred|  )' || true
 
 step "boot checks"
@@ -72,6 +73,8 @@ for u in mpd musicos-agent musicos-kiosk musicos-apply.path NetworkManager; do
     fi
 done
 
+rootsize=$(gexec "df -h --output=size / | tail -1" | tr -d ' ')
+echo "info root filesystem $rootsize"
 ip=$(qm guest cmd "$VMID" network-get-interfaces | python3 -c '
 import json,sys
 for i in json.load(sys.stdin):

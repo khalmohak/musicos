@@ -6,12 +6,14 @@ Window.SetBackgroundBottomColor(0.039, 0.039, 0.051);
 screen_w = Window.GetWidth();
 screen_h = Window.GetHeight();
 size = Math.Int(screen_h * 0.26);
-if (size > 360) size = 360;
+if (size > 720) size = 720;
 
 record = Image("record.png").Scale(size, size);
 record_sprite = Sprite();
 
-word = Image.Text("m u s i c o s", 0.86, 0.84, 0.80, 1, "Sans Light 17");
+# wordmark scales with the screen: 17px at 1080p, 34px at 4K
+font_px = Math.Int(screen_h / 63);
+word = Image.Text("m u s i c o s", 0.86, 0.84, 0.80, 1, "Sans Light " + font_px);
 word_sprite = Sprite(word);
 
 gap = Math.Int(screen_h * 0.045);

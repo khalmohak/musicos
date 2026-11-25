@@ -8,8 +8,8 @@ import os
 import struct
 import zlib
 
-SIZE = 360          # output px; plymouth scales to the screen
-SS = 3              # supersampling per axis
+SIZE = 720          # output px: sharp on 4K (plymouth only scales down)
+SS = 2              # supersampling per axis
 LABEL = (226, 225, 221)   # neutral label, as in Record.tsx
 OUT = os.path.join(os.path.dirname(__file__), "..", "image", "mkosi.extra", "usr", "share", "plymouth",
                    "themes", "musicos", "record.png")
