@@ -1,0 +1,33 @@
+#!/bin/sh
+# Called by udev for every new block device with a filesystem (see 90-musicos-drives.rules).
+# Mounts music drives under /srv/music on first access:
+#   USB drives        -> /srv/music/usb-<label>
+#   internal drives   -> /srv/music/disk-<label>
+# The disk we booted from, swap, LVM/RAID/LUKS members are ignored.
+set -u
+dev="$1"
+[ -b "$dev" ] || exit 0
+[ "${ID_FS_USAGE:-}" = "filesystem" ] || exit 0
+case "${ID_FS_TYPE:-}" in ""|swap|LVM2_member|linux_raid_member|crypto_LUKS|iso9660|udf) exit 0 ;; esac
+
+root_src=$(findmnt -no SOURCE / 2>/dev/null)
+root_disk=$(lsblk -no PKNAME "$root_src" 2>/dev/null | head -1)
+this_disk=$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)
+[ -n "$root_disk" ] && [ "$this_disk" = "$root_disk" ] && exit 0
+
+prefix=disk
+[ "${ID_BUS:-}" = "usb" ] && prefix=usb
+name=$(printf '%s' "${ID_FS_LABEL:-${ID_FS_UUID:-drive}}" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)
+where="/srv/music/$prefix-$name"
+
+opts="nosuid,nodev,noexec,noatime"
+type=""
+uid=$(id -u music 2>/dev/null || echo 1000)
+gid=$(getent group audio | cut -d: -f3)
+case "$ID_FS_TYPE" in
+    vfat|exfat) opts="$opts,uid=$uid,gid=$gid,umask=0002" ;;
+    ntfs|ntfs3) opts="$opts,uid=$uid,gid=$gid,umask=0002"; type="--type=ntfs3" ;;
+esac
+
+# shellcheck disable=SC2086
+exec /usr/bin/systemd-mount --no-block --automount=yes --collect --options="$opts" $type "$dev" "$where"

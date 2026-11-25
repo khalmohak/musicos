@@ -7,6 +7,8 @@ After=mpd.service network.target
 User=music
 Environment=PYTHONPATH=/opt/musicos/agent
 Environment=MUSICOS_UI=/opt/musicos/ui
+Environment=MUSICOS_STATE=/var/lib/musicos
+Environment=MUSICOS_MUSIC_ROOT=/srv/music
 EnvironmentFile=-/etc/musicos/agent.env
 ExecStart=/usr/bin/python3 -m musicos_agent
 Restart=always

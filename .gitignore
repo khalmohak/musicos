@@ -7,3 +7,4 @@ __pycache__/
 .DS_Store
 image/mkosi.extra/etc/musicos/smb-credentials
 .pipeline.env
+.venv/

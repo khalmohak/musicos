@@ -1,11 +1,14 @@
-PY ?= python3
+PY ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
 PORT ?= 8080
 AGENT = PYTHONPATH=agent $(PY) -m musicos_agent --port $(PORT)
 
-.PHONY: help dev dev-mpd check image vm deploy test clean
+.PHONY: help ui ui-dev dev dev-library dev-mpd check image vm deploy test clean
 
 help:
-	@echo "make dev       UI + agent with a fake library (any machine, no MPD)"
+	@echo "make ui        build the TV UI (ui/dist)"
+	@echo "make ui-dev    Vite dev server with hot reload on :5173 (run an agent too)"
+	@echo "make dev       built UI + agent with a fake library (no MPD)"
+	@echo "make dev-library LIBRARY=/Volumes/8TB/media/music/library   real covers, simulated playback"
 	@echo "make dev-mpd   UI + agent against a local MPD (macOS: brew install mpd)"
 	@echo "make check     syntax-check agent, UI and scripts"
 	@echo "make image     build out/musicos.raw (Debian trixie build host, needs root)"
@@ -13,8 +16,18 @@ help:
 	@echo "make deploy    push image to Proxmox and recreate the test VM (PVE_HOST=root@pve)"
 	@echo "make test      sync, build on the build VM, deploy, boot-check, screenshot (.pipeline.env)"
 
-dev:
+ui:
+	cd ui && npm ci --no-audit --no-fund && npm run build
+
+ui-dev:
+	cd ui && npm run dev
+
+dev: ui
 	$(AGENT) --mock
+
+LIBRARY ?= /Volumes/8TB/media/music/library
+dev-library: ui
+	$(AGENT) --library "$(LIBRARY)"
 
 dev-mpd:
 	@mkdir -p ~/.musicos-dev/playlists
@@ -24,8 +37,9 @@ dev-mpd:
 
 check:
 	$(PY) -m py_compile agent/musicos_agent/*.py
-	@command -v node >/dev/null && node --check ui/app.js || echo "(node not found, skipped JS check)"
+	cd ui && npx tsc -b
 	bash -n scripts/*.sh
+	python3 -m py_compile scripts/*.py
 	sh -n image/mkosi.postinst.chroot image/mkosi.extra/usr/local/bin/musicos-browser
 	@echo ok
 

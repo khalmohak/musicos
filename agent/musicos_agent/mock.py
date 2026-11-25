@@ -39,6 +39,18 @@ class MockClient:
                          "duration": 240.0, "_artist": artist, "_album": album} for i, t in enumerate(tracks)]
         return []
 
+    def all_albums(self):
+        out = []
+        for artist in self.artists():
+            for a in self.albums(artist):
+                out.append(dict(a, artist=artist))
+        return out
+
+    def stats(self):
+        al = self.all_albums()
+        return {"artists": len(LIBRARY), "albums": len(al), "songs": sum(a["tracks"] for a in al),
+                "updating": False}
+
     def albumart(self, uri):
         return None
 

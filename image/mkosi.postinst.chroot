@@ -11,9 +11,29 @@ for g in audio video render input sudo; do
     getent group "$g" >/dev/null && usermod -aG "$g" music
 done
 
-mkdir -p /srv/music
-chmod 755 /srv/music
+# music library root; /srv/music/local is for files copied onto the device
+mkdir -p /srv/music/local
+chown music:audio /srv/music/local
+chmod 2775 /srv/music/local
+
+# agent state (settings, sources, cover cache); readable so MPD can include the output config
+install -d -o music -g music -m 0755 /var/lib/musicos
+if [ ! -f /var/lib/musicos/mpd-output.conf ]; then
+    cat > /var/lib/musicos/mpd-output.conf <<'EOF'
+audio_output {
+    type        "alsa"
+    name        "musicos"
+    device      "default"
+    mixer_type  "software"
+}
+EOF
+fi
+install -d -m 0700 /etc/musicos/creds
+
 chmod 755 /usr/local/bin/musicos-browser
 
-systemctl enable systemd-networkd systemd-resolved ssh mpd musicos-agent musicos-kiosk
+systemctl enable NetworkManager systemd-resolved systemd-timesyncd avahi-daemon ssh mpd \
+    musicos-agent musicos-kiosk musicos-apply.path musicos-apply.service
+# NetworkManager owns networking; networkd's wait-online would stall boot for 2 minutes
+systemctl disable systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service 2>/dev/null || true
 systemctl set-default graphical.target

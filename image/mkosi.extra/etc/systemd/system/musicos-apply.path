@@ -1,0 +1,8 @@
+[Unit]
+Description=Apply musicos settings when the agent asks
+
+[Path]
+PathChanged=/var/lib/musicos/apply-request
+
+[Install]
+WantedBy=multi-user.target

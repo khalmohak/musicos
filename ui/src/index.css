@@ -1,0 +1,192 @@
+@import "@glyphui/ui/fonts.css";
+@import "tailwindcss";
+@import "@glyphui/ui/styles.css";
+
+@source "./";
+
+/*
+ * musicos: a 10-foot, tvOS-flavoured surface.
+ * Performance rules (the device may have a weak GPU):
+ *   - animate only transform and opacity
+ *   - no CSS blur / backdrop-filter; backdrops come pre-blurred from the agent (?blur=1)
+ *   - shadows are static per element, focus swaps them via opacity of a pseudo layer
+ */
+:root {
+  --mo-accent: 120 120 130; /* follows the album in focus; set by lib/color.ts */
+  --mo-bg: 9 9 11;
+  --mo-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  color-scheme: dark;
+  /* rem drives everything (Glyph too): ~24px at 1080p, capped for 4K */
+  font-size: clamp(14px, 1.25vw, 30px);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: rgb(var(--mo-bg));
+  overflow: hidden;
+}
+
+body {
+  cursor: none;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  letter-spacing: -0.005em;
+}
+
+/* ---------- focus language ---------- */
+.tv :focus,
+.tv :focus-visible {
+  outline: none;
+}
+
+/* lift: the tvOS "this is what OK will do" */
+.lift {
+  transition: transform 260ms var(--mo-ease);
+  will-change: transform;
+}
+.lift::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 1.8rem 3.2rem -1rem rgb(0 0 0 / 0.85);
+  opacity: 0;
+  transition: opacity 260ms var(--mo-ease);
+  pointer-events: none;
+}
+.lift.is-focused,
+.lift:focus-visible {
+  transform: scale(1.08);
+  z-index: 2;
+}
+.lift.is-focused::after,
+.lift:focus-visible::after {
+  opacity: 1;
+}
+
+/* capsule buttons (Glyph Button underneath) */
+.tv [data-slot="button"] {
+  height: 3.1rem;
+  padding-inline: 1.7rem;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 550;
+  gap: 0.6rem;
+  background: rgb(255 255 255 / 0.1);
+  color: rgb(255 255 255 / 0.85);
+  box-shadow: none;
+  transition:
+    transform 220ms var(--mo-ease),
+    background-color 220ms var(--mo-ease),
+    color 220ms var(--mo-ease);
+}
+.tv [data-slot="button"] svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.tv [data-slot="button"]:focus-visible,
+.tv [data-slot="button"]:focus {
+  background: rgb(255 255 255);
+  color: rgb(12 12 14);
+  transform: scale(1.06);
+}
+
+/* rows in lists (outputs, sources, tracks) */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  width: 100%;
+  border-radius: 1rem;
+  padding: 0.95rem 1.25rem;
+  background: rgb(255 255 255 / 0.055);
+  color: rgb(255 255 255 / 0.85);
+  text-align: left;
+  transition:
+    transform 220ms var(--mo-ease),
+    background-color 220ms var(--mo-ease),
+    color 220ms var(--mo-ease);
+}
+.row:focus-visible,
+.row:focus,
+.row.is-focused {
+  background: rgb(255 255 255);
+  color: rgb(12 12 14);
+  transform: scale(1.03);
+}
+.row .sub {
+  color: rgb(255 255 255 / 0.5);
+}
+.row:focus .sub,
+.row.is-focused .sub {
+  color: rgb(12 12 14 / 0.55);
+}
+
+/* ---------- ambient light ---------- */
+/* plain radial gradients: soft by nature, no filter needed */
+.mo-ambient {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 70% at 18% 0%, rgb(var(--mo-accent) / 0.2), transparent 70%),
+    radial-gradient(50% 60% at 100% 100%, rgb(var(--mo-accent) / 0.08), transparent 70%);
+}
+
+/* pre-blurred cover backdrop (img src=…&blur=1), dimmed toward the edges */
+.mo-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.15);
+}
+
+/* ---------- motion ---------- */
+@keyframes mo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes mo-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes mo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+}
+.mo-spin {
+  animation: mo-spin 2.4s linear infinite;
+}
+.mo-paused .mo-spin {
+  animation-play-state: paused;
+}
+.mo-fade-in {
+  animation: mo-fade-in 500ms ease both;
+}
+.mo-rise {
+  animation: mo-rise 560ms var(--mo-ease) both;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.eyebrow {
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.5);
+  font-weight: 500;
+}

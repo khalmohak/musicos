@@ -20,8 +20,12 @@ JUMP="ssh -o BatchMode=yes -J $PVE_HOST"
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 
 if [ -z "${SKIP_BUILD:-}" ]; then
+    step "build UI"
+    (cd ui && { [ -d node_modules ] || npm ci --no-audit --no-fund; } && npm run build >/dev/null) \
+        || { echo "UI BUILD FAILED" >&2; exit 1; }
+
     step "sync repo -> $BUILD_HOST"
-    rsync -az --delete --exclude .git --exclude out --exclude image/mkosi.cache \
+    rsync -az --delete --exclude .git --exclude out --exclude image/mkosi.cache --exclude ui/node_modules \
         -e "$JUMP" ./ "$BUILD_HOST:musicos/"
 
     step "build image (log: $OUT/build.log)"
@@ -35,7 +39,7 @@ if [ -z "${SKIP_BUILD:-}" ]; then
 fi
 
 step "deploy VM $VMID"
-PVE_HOST="$PVE_HOST" BUILD_HOST="$BUILD_HOST" VMID="$VMID" ./scripts/proxmox-deploy.sh \
+PVE_HOST="$PVE_HOST" BUILD_HOST="$BUILD_HOST" VMID="$VMID" CORES="${CORES:-2}" MEMORY="${MEMORY:-2048}" ./scripts/proxmox-deploy.sh \
     | grep -vE '^(transferred|  )' || true
 
 step "boot checks"
@@ -47,12 +51,16 @@ gexec() {  # run a shell command in the guest, print stdout
         | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("out-data","").rstrip())'
 }
 fail=0
+# catch the Plymouth splash mid-boot
+for i in $(seq 1 40); do [ "$(qm status "$VMID" | awk '{print $2}')" = running ] && break; sleep 0.5; done
+sleep "${SPLASH_AT:-6}"
+qm monitor "$VMID" <<< "screendump /var/tmp/musicos-splash.ppm" >/dev/null
 for i in $(seq 1 60); do qm guest cmd "$VMID" ping >/dev/null 2>&1 && break; sleep 3; done
 qm guest cmd "$VMID" ping >/dev/null 2>&1 || { echo "FAIL guest agent never came up"; exit 1; }
 echo "ok   guest agent"
 
 sleep 20   # let the kiosk settle so a crash loop shows up as restarts
-for u in mpd musicos-agent musicos-kiosk; do
+for u in mpd musicos-agent musicos-kiosk musicos-apply.path NetworkManager; do
     state=$(gexec "systemctl is-active $u")
     restarts=$(gexec "systemctl show -p NRestarts --value $u")
     if [ "$state" = active ] && [ "${restarts:-0}" -le 1 ]; then
@@ -81,10 +89,13 @@ exit $fail
 EOF
 rc=${PIPESTATUS[0]}
 
-step "screenshot"
-scp -q "$PVE_HOST:/var/tmp/musicos-shot.ppm" "$OUT/screen.ppm"
-python3 scripts/ppm2png.py "$OUT/screen.ppm" "$OUT/screen.png" >/dev/null
-rm -f "$OUT/screen.ppm"
-echo "$OUT/screen.png"
+step "screenshots"
+for name in splash shot; do
+    scp -q "$PVE_HOST:/var/tmp/musicos-$name.ppm" "$OUT/$name.ppm" 2>/dev/null || continue
+    python3 scripts/ppm2png.py "$OUT/$name.ppm" "$OUT/$name.png" >/dev/null
+    rm -f "$OUT/$name.ppm"
+done
+mv -f "$OUT/shot.png" "$OUT/screen.png" 2>/dev/null || true
+ls "$OUT"/*.png
 
 [ "$rc" -eq 0 ] && step "PASS" || { step "FAIL"; exit "$rc"; }

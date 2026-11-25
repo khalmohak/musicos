@@ -1,27 +1,13 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>musicos</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <header>
-    <div id="crumbs"></div>
-    <div id="clock"></div>
-  </header>
-  <main id="view" aria-live="polite"></main>
-  <footer id="np">
-    <div id="np-art"></div>
-    <div id="np-meta">
-      <div id="np-title">Nothing playing</div>
-      <div id="np-sub"></div>
-      <div id="np-bar"><div id="np-fill"></div></div>
-    </div>
-    <div id="np-state"></div>
-  </footer>
-  <div id="hint">← → ↑ ↓ move · Enter open/play · Back return · Space play/pause · N/P next/prev · +/− volume</div>
-  <script src="app.js"></script>
-</body>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>musicos</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

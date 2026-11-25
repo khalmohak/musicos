@@ -1,0 +1,38 @@
+# Same composition as ui/src/screens/Boot.tsx so the hand-off to the UI is seamless:
+# a record spinning once every 2.4 s above a spaced-out wordmark, on #0a0a0d.
+Window.SetBackgroundTopColor(0.039, 0.039, 0.051);
+Window.SetBackgroundBottomColor(0.039, 0.039, 0.051);
+
+screen_w = Window.GetWidth();
+screen_h = Window.GetHeight();
+size = Math.Int(screen_h * 0.26);
+if (size > 360) size = 360;
+
+record = Image("record.png").Scale(size, size);
+record_sprite = Sprite();
+
+word = Image.Text("m u s i c o s", 0.86, 0.84, 0.80, 1, "Sans Light 17");
+word_sprite = Sprite(word);
+
+gap = Math.Int(screen_h * 0.045);
+block = size + gap + word.GetHeight();
+top = Window.GetY() + (screen_h - block) / 2;
+cx = Window.GetX() + screen_w / 2;
+word_sprite.SetX(cx - word.GetWidth() / 2);
+word_sprite.SetY(top + size + gap);
+
+angle = 0;
+frame = 0;
+fun refresh_callback() {
+    frame++;
+    angle += 2 * Math.Pi / 120;   # 50 fps * 2.4 s per turn
+    turned = record.Rotate(angle);
+    record_sprite.SetImage(turned);
+    record_sprite.SetX(cx - turned.GetWidth() / 2);
+    record_sprite.SetY(top + size / 2 - turned.GetHeight() / 2);
+    fade = frame / 25;
+    if (fade > 1) fade = 1;
+    record_sprite.SetOpacity(fade);
+    word_sprite.SetOpacity(fade);
+}
+Plymouth.SetRefreshFunction(refresh_callback);

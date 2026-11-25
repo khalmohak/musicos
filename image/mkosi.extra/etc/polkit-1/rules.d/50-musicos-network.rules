@@ -1,0 +1,6 @@
+// The musicos UI (running as "music") may join Wi-Fi networks and manage connections.
+polkit.addRule(function (action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.user === "music") {
+        return polkit.Result.YES;
+    }
+});

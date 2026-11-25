@@ -1,0 +1,3 @@
+# Music drives (USB and internal) mount themselves under /srv/music. See /usr/local/lib/musicos/automount.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", RUN{program}+="/usr/local/lib/musicos/automount $devnode"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", RUN{program}+="/usr/bin/systemd-mount --umount $devnode"
