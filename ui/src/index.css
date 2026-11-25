@@ -33,7 +33,7 @@ body,
 }
 
 body {
-  cursor: none;
+  cursor: none; /* shown while a mouse/touchpad is in use (App adds .mo-pointer) */
   -webkit-font-smoothing: antialiased;
   user-select: none;
   letter-spacing: -0.005em;
@@ -102,10 +102,11 @@ body {
   transition-timing-function: var(--mo-spring) !important;
   display: flex;
   align-items: center;
-  gap: 1.1rem;
+  gap: 1.25rem;
   width: 100%;
-  border-radius: 1rem;
-  padding: 0.95rem 1.25rem;
+  min-height: 4.4rem;
+  border-radius: 1.1rem;
+  padding: 1.05rem 1.5rem;
   background: rgb(255 255 255 / 0.055);
   color: rgb(255 255 255 / 0.85);
   text-align: left;
@@ -254,4 +255,13 @@ body {
   animation:
     mo-photo-in 1200ms ease both,
     mo-kenburns 40s ease-out both;
+}
+
+body.mo-pointer {
+  cursor: default;
+}
+body.mo-pointer [data-nav],
+body.mo-pointer .lift,
+body.mo-pointer button {
+  cursor: pointer;
 }

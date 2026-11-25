@@ -5,7 +5,7 @@ import { Cover } from '../components/Cover'
 import { FormatBadges } from '../components/ui'
 import { type Album, type Status, type Track, api, backdropUrl, coverUrl, fmtTime } from '../lib/api'
 import { setAccentFrom } from '../lib/color'
-import { moveFocus, useRemote } from '../lib/keys'
+import { moveSpatial, useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 
 export function AlbumView({
@@ -36,8 +36,7 @@ export function AlbumView({
 
   useRemote((k) => {
     if (k === 'back') return sfx.back(), onBack(), true
-    if (k === 'up' || k === 'left') return moveFocus(ref.current, -1) ? (sfx.tick(), true) : (sfx.edge(), true)
-    if (k === 'down' || k === 'right') return moveFocus(ref.current, 1) ? (sfx.tick(), true) : (sfx.edge(), true)
+    if (k === 'up' || k === 'down' || k === 'left' || k === 'right') return moveSpatial(ref.current, k) ? (sfx.tick(), true) : (sfx.edge(), true)
     return false
   })
 

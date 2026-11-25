@@ -106,7 +106,7 @@ export interface BtState {
   devices: BtDevice[]
 }
 export interface DisplayInfo {
-  outputs: { name: string; current: string; modes: string[] }[]
+  outputs: { name: string; current: string; recommended?: string; modes: string[] }[]
   demo: boolean
 }
 export interface Connection {

@@ -79,7 +79,12 @@ export function ArtistView({
             {albums.length === 1 ? '1 album' : `${albums.length} albums`}
           </div>
           <div className="mt-6">
-            <Button className={zone === 'actions' ? 'bg-white! text-[rgb(12_12_14)]! scale-[1.06]' : ''} tabIndex={-1}>
+            <Button
+              className={zone === 'actions' ? 'bg-white! text-[rgb(12_12_14)]! scale-[1.06]' : ''}
+              tabIndex={-1}
+              onMouseEnter={() => setZone('actions')}
+              onClick={() => (sfx.select(), api.shuffle(name).then(onPlayed).catch(() => {}))}
+            >
               <Shuffle />
               Shuffle {name}
             </Button>
@@ -95,7 +100,9 @@ export function ArtistView({
                 ref={(el) => {
                   tiles.current[i] = el
                 }}
-                className="w-[13vw] shrink-0"
+                className="w-[13vw] shrink-0 cursor-pointer"
+                onClick={() => (sfx.select(), onOpenAlbum(a))}
+                onMouseEnter={() => (setZone('albums'), setIdx(i))}
               >
                 <div className={`lift relative aspect-square rounded-[0.7rem] ${on ? 'is-focused' : ''}`}>
                   <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.14} eager className="size-full rounded-[0.7rem]" />

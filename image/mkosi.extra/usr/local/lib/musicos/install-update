@@ -1,0 +1,12 @@
+#!/bin/sh
+# Run by musicos-update.service (root): install the update staged in /var/lib/musicos/updates
+# into the inactive /usr slot + ESP. The UI reads update-status.json; the reboot is the user's.
+st=/var/lib/musicos/update-status.json
+log=/var/lib/musicos/update.log
+printf '{"state": "installing"}\n' > "$st"
+if /usr/lib/systemd/systemd-sysupdate --no-pager update > "$log" 2>&1; then
+    printf '{"state": "installed"}\n' > "$st"
+else
+    printf '{"state": "failed"}\n' > "$st"
+fi
+chmod 644 "$st" "$log"

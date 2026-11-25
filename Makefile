@@ -46,6 +46,7 @@ check:
 	@echo ok
 
 image:
+	./scripts/fetch-spotify.sh
 	date +%Y%m%d.%H%M > image/mkosi.version
 	cd image && sudo mkosi -f build
 

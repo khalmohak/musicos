@@ -360,9 +360,20 @@ def make_handler(client, ui_dir, covers, port):
                     st["receiver"] = receivers.status()
                     return self._send(200, st)
                 if p == "/api/receiver/cover":
-                    if not receivers.COVER["data"]:
+                    data = receivers.COVER["data"]
+                    if not data:
                         return self._send(404, {})
-                    return self._send(200, receivers.COVER["data"], receivers.COVER["type"])
+                    if q.get("blur") == "1" and Image is not None:
+                        try:  # same pre-blurred backdrop as albums: no CSS blur on the TV
+                            from PIL import ImageFilter
+                            im = Image.open(io.BytesIO(data)).convert("RGB").resize((24, 24), Image.BILINEAR)
+                            im = im.resize((96, 96), Image.BICUBIC).filter(ImageFilter.GaussianBlur(6))
+                            buf = io.BytesIO()
+                            im.save(buf, "JPEG", quality=85)
+                            return self._send(200, buf.getvalue(), "image/jpeg")
+                        except Exception:
+                            pass
+                    return self._send(200, data, receivers.COVER["type"])
                 if p == "/api/info":
                     return self._send(200, dict(system.device_info(port), backend=type(client).__name__))
                 if p == "/api/config":

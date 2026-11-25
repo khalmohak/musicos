@@ -9,12 +9,10 @@ until python3 -c "import sys,urllib.request; urllib.request.urlopen(sys.argv[1],
     sleep 0.5
 done
 
-# apply the display mode chosen in Settings > Display (empty = the TV's preferred mode)
+# display mode: the one chosen in Settings > Display, else the sharpest mode at >= 50 Hz
+# (a 4K TV on an HDMI 1.4 port would otherwise sit at 24/30 Hz and every animation stutters)
 mode=$(python3 -c "import json; print(json.load(open('/var/lib/musicos/config.json')).get('displayMode',''))" 2>/dev/null)
-if [ -n "$mode" ] && command -v wlr-randr >/dev/null 2>&1; then
-    out=$(wlr-randr 2>/dev/null | awk '/^[^ ]/{print $1; exit}')
-    [ -n "$out" ] && wlr-randr --output "$out" --mode "${mode%@*}@${mode#*@}Hz" 2>&1 | head -2
-fi
+PYTHONPATH=/usr/lib/musicos/agent python3 -m musicos_agent.device display "$mode" 2>&1 | head -3
 
 if command -v cog >/dev/null 2>&1; then
     exec cog "$URL"

@@ -17,8 +17,8 @@ import { Row, Toggle } from './ui'
 
 function Section({ title, children }: { title?: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-2">
-      {title && <div className="eyebrow mb-1 px-1">{title}</div>}
+    <div className="flex flex-col gap-2.5">
+      {title && <div className="eyebrow mb-1.5 px-1.5">{title}</div>}
       {children}
     </div>
   )
@@ -158,7 +158,7 @@ export function SoundPanel({ config, onConfig }: { config: Config; onConfig: (c:
   const usingDevice = config.audioDevice !== 'default'
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-10">
       <Section title="Output">
         {outputs.map((o) => (
           <Row
@@ -235,7 +235,7 @@ export function LibraryPanel() {
 
   const busy = scanning || !!stats?.updating
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-10">
       <Section title="Sources">
         <div className="no-scrollbar flex max-h-[28vh] flex-col gap-2 overflow-y-auto p-1">
           {sources.map((s) => (
@@ -366,7 +366,7 @@ export function BluetoothPanel() {
     load()
   }
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-10">
       <Section title="Bluetooth">
         <Row
           icon={(p: { className?: string; strokeWidth?: number }) => <RefreshCw {...p} className={`${p.className} ${scanning ? 'mo-spin' : ''}`} />}
@@ -465,6 +465,102 @@ export function TimezonePicker({ onDone }: { onDone?: (zone: string) => void }) 
 }
 
 // ---------------------------------------------------------------- display
+
+const pretty = (m: string) => {
+  const [res, hz] = m.split('@')
+  const [w, h] = res.split('x')
+  return { res: `${w} × ${h}`, hz: `${hz} Hz`, tag: Number(w) >= 3840 ? '4K' : Number(h) >= 1440 ? 'QHD' : Number(h) >= 1080 ? 'Full HD' : 'HD' }
+}
+
+/** Every mode the display offers, sharpest first; picking one asks "Keep this?" for 15 s. */
+function ResolutionPicker({ disp, onPicked, onClose }: { disp: DisplayInfo; onPicked: (c: Config) => void; onClose: () => void }) {
+  const out = disp.outputs[0]
+  const [current, setCurrent] = useState(out.current)
+  const [confirm, setConfirm] = useState<{ prev: string; next: string; left: number } | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const modes = [...out.modes].sort((a, b) => {
+    const [ra, ha] = a.split('@')
+    const [rb, hb] = b.split('@')
+    const pa = ra.split('x').map(Number)
+    const pb = rb.split('x').map(Number)
+    return pb[0] * pb[1] - pa[0] * pa[1] || Number(hb) - Number(ha)
+  })
+  useEffect(() => {
+    const t = setTimeout(() => focusFirst(ref.current), 40)
+    return () => clearTimeout(t)
+  }, [confirm === null])
+  // countdown: no answer = the TV probably can't show it, go back
+  useEffect(() => {
+    if (!confirm) return
+    if (confirm.left <= 0) {
+      api.setDisplay(out.name, confirm.prev).then(onPicked).catch(() => {})
+      setCurrent(confirm.prev)
+      setConfirm(null)
+      return
+    }
+    const t = setTimeout(() => setConfirm((c) => (c ? { ...c, left: c.left - 1 } : c)), 1000)
+    return () => clearTimeout(t)
+  }, [confirm])
+  useRemote((k) => {
+    if (k !== 'back') return false
+    sfx.back()
+    if (confirm) {
+      api.setDisplay(out.name, confirm.prev).then(onPicked).catch(() => {})
+      setCurrent(confirm.prev)
+      setConfirm(null)
+    } else onClose()
+    return true
+  })
+
+  const pick = async (m: string) => {
+    if (m === current) return sfx.edge()
+    sfx.select()
+    try {
+      onPicked(await api.setDisplay(out.name, m))
+      setConfirm({ prev: current, next: m, left: 15 })
+      setCurrent(m)
+    } catch {
+      sfx.edge()
+    }
+  }
+
+  if (confirm) {
+    const p = pretty(confirm.next)
+    return (
+      <div ref={ref} className="flex flex-col gap-3">
+        <div className="mb-3">
+          <div className="text-[1.5rem] font-semibold">Keep {p.res} at {p.hz}?</div>
+          <div className="mt-1 text-[0.95rem] text-white/55">Going back to the previous setting in {confirm.left} s.</div>
+        </div>
+        <Row icon={Check} title="Keep" autoFocus onClick={() => (sfx.select(), setConfirm(null))} />
+        <Row icon={RotateCcw} title="Go back" onClick={() => setConfirm({ ...confirm, left: 0 })} />
+      </div>
+    )
+  }
+  return (
+    <div ref={ref} className="flex flex-col gap-2.5">
+      <div className="eyebrow mb-1.5 px-1.5">Resolution & refresh rate · {out.name}</div>
+      {modes.map((m) => {
+        const p = pretty(m)
+        const isCur = m === current
+        const isRec = m === out.recommended
+        return (
+          <Row
+            key={m}
+            icon={Monitor}
+            title={`${p.res} · ${p.hz}`}
+            sub={[p.tag, isRec ? 'Recommended: sharpest at a smooth refresh rate' : Number(m.split('@')[1]) < 50 ? 'Low refresh: motion looks choppy' : ''].filter(Boolean).join(' · ')}
+            autoFocus={isCur}
+            trailing={isCur ? <Check className="size-5" /> : isRec ? <span className="text-[0.8rem] font-semibold">Recommended</span> : null}
+            onClick={() => pick(m)}
+          />
+        )
+      })}
+      <Note>{disp.demo ? 'Demo modes (dev machine).' : 'Each change asks you to confirm within 15 seconds.'}</Note>
+    </div>
+  )
+}
+
 const SCALES: [number, string][] = [[0.85, 'Smaller'], [0.92, 'Small'], [1, 'Default'], [1.1, 'Large'], [1.2, 'Larger']]
 const SLEEPS = [0, 15, 30, 60, 120]
 const SAVERS = [2, 5, 10, 30, 0]
@@ -472,51 +568,43 @@ const next = <T,>(list: T[], v: T) => list[(list.indexOf(v) + 1) % list.length]
 
 export function DisplayPanel({ config, onConfig }: { config: Config; onConfig: (c: Config) => void }) {
   const [disp, setDisp] = useState<DisplayInfo | null>(null)
-  const [pending, setPending] = useState<{ prev: string; left: number } | null>(null)
+  const [picking, setPicking] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const load = () => api.display().then(setDisp).catch(() => {})
   useEffect(() => {
-    api.display().then(setDisp).catch(() => {})
+    load()
   }, [])
-  // a new mode must be confirmed within 15 s, so a mode the TV can't show reverts by itself
-  useEffect(() => {
-    if (!pending) return
-    if (pending.left <= 0) {
-      const out = disp?.outputs[0]
-      if (out && pending.prev) api.setDisplay(out.name, pending.prev).then(onConfig).catch(() => {})
-      setPending(null)
-      api.display().then(setDisp).catch(() => {})
-      return
-    }
-    const t = setTimeout(() => setPending((p) => (p ? { ...p, left: p.left - 1 } : p)), 1000)
-    return () => clearTimeout(t)
-  }, [pending])
 
   const save = async (c: Partial<Config>) => {
     sfx.select()
     onConfig(await api.saveConfig(c))
   }
+  if (picking && disp?.outputs[0]) {
+    return (
+      <ResolutionPicker
+        disp={disp}
+        onPicked={(c) => (onConfig(c), load())}
+        onClose={() => {
+          setPicking(false)
+          load()
+          setTimeout(() => focusFirst(ref.current), 60)
+        }}
+      />
+    )
+  }
   const out = disp?.outputs[0]
   const scale = SCALES.find(([v]) => Math.abs(v - (config.uiScale ?? 1)) < 0.01) ?? SCALES[2]
+  const cur = out?.current ? pretty(out.current) : null
   return (
-    <div className="flex flex-col gap-6">
+    <div ref={ref} className="flex flex-col gap-10">
       <Section title="Screen">
         {out && (
           <Row
             icon={Monitor}
-            title="Resolution"
-            sub={pending ? `Keep ${out.current}? Press OK to keep · reverting in ${pending.left} s` : `${out.name} · OK to try the next mode${disp?.demo ? ' (demo)' : ''}`}
-            trailing={<span className="text-[0.95rem] font-medium tabular-nums">{out.current.replace('@', ' · ')} Hz</span>}
-            onClick={async () => {
-              sfx.select()
-              if (pending) return setPending(null) // kept
-              const mode = next(out.modes, out.current)
-              try {
-                onConfig(await api.setDisplay(out.name, mode))
-                setDisp({ ...disp!, outputs: [{ ...out, current: mode }] })
-                setPending({ prev: out.current, left: 15 })
-              } catch {
-                sfx.edge()
-              }
-            }}
+            title="Resolution & refresh rate"
+            sub={out.recommended && out.current !== out.recommended ? `Recommended: ${pretty(out.recommended).res} · ${pretty(out.recommended).hz}` : out.name}
+            trailing={cur ? <span className="text-[0.95rem] font-medium tabular-nums">{cur.res} · {cur.hz}</span> : null}
+            onClick={() => (sfx.select(), setPicking(true))}
           />
         )}
         <Row icon={ZoomIn} title="Interface size" sub="For sitting closer or further from the TV" trailing={<span className="text-[0.95rem] font-medium">{scale[1]}</span>}
@@ -525,7 +613,7 @@ export function DisplayPanel({ config, onConfig }: { config: Config; onConfig: (
           onClick={() => save({ overscan: next([0, 1, 2, 3, 4, 5], config.overscan ?? 0) })} />
       </Section>
       <Section title="When idle">
-        <Row icon={MonitorPlay} title="Screensaver" sub="Now playing, or a slow drift across your covers. Moves so OLEDs don't burn in." trailing={<span className="text-[0.95rem] font-medium">{config.screensaver ? `${config.screensaver} min` : 'Never'}</span>}
+        <Row icon={MonitorPlay} title="Screensaver" sub="What's playing, or a slow photo slideshow with the time. Moves so OLEDs don't burn in." trailing={<span className="text-[0.95rem] font-medium">{config.screensaver ? `${config.screensaver} min` : 'Never'}</span>}
           onClick={() => save({ screensaver: next(SAVERS, config.screensaver ?? 5) })} />
         <Row icon={TvMinimal} title="Turn off TV" sub="When nothing is playing (HDMI-CEC)" trailing={<span className="text-[0.95rem] font-medium">{config.autoSleep ? `after ${config.autoSleep} min` : 'Never'}</span>}
           onClick={() => save({ autoSleep: next(SLEEPS, config.autoSleep ?? 0) })} />

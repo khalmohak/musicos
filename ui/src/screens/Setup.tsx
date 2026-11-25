@@ -11,7 +11,7 @@ import { RemoteIcon } from '../components/icons'
 import { PhotoBackdrop } from '../components/PhotoBackdrop'
 import { PageDots, StepShell } from '../components/ui'
 import { type Config, api } from '../lib/api'
-import { focusFirst, moveFocus, useRemote } from '../lib/keys'
+import { focusFirst, moveSpatial, useRemote } from '../lib/keys'
 import { primeAudio, sfx } from '../lib/sounds'
 
 const STEPS = ['welcome', 'you', 'time', 'network', 'sound', 'music', 'remote', 'ready'] as const
@@ -41,8 +41,7 @@ export function Setup({ config: initial, onDone }: { config: Config; onDone: (c:
       return true
     }
     if (id === 'you' || id === 'remote') return false
-    if (k === 'up' || k === 'left') return moveFocus(ref.current, -1) ? (sfx.tick(), true) : (sfx.edge(), true)
-    if (k === 'down' || k === 'right') return moveFocus(ref.current, 1) ? (sfx.tick(), true) : (sfx.edge(), true)
+    if (k === 'up' || k === 'down' || k === 'left' || k === 'right') return moveSpatial(ref.current, k) ? (sfx.tick(), true) : (sfx.edge(), true)
     return false
   })
 

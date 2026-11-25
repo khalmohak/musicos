@@ -152,6 +152,27 @@ export function App() {
     return false
   })
 
+  // mouse / touchpad: show the cursor while it moves, hover moves focus so keys and pointer agree
+  useEffect(() => {
+    let t = 0
+    const onMove = () => {
+      document.body.classList.add('mo-pointer')
+      lastInput.current = Date.now()
+      window.clearTimeout(t)
+      t = window.setTimeout(() => document.body.classList.remove('mo-pointer'), 3000)
+    }
+    const onOver = (e: MouseEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-nav]') as HTMLElement | null
+      if (el && document.activeElement !== el) el.focus({ preventScroll: true })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseover', onOver)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseover', onOver)
+    }
+  }, [])
+
   // UI size and TV overscan (Settings > Display)
   useEffect(() => {
     const root = document.documentElement

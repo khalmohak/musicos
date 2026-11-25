@@ -138,11 +138,21 @@ export function Home({
   })
 
   const empty = count === 0
+  const headerClick = (i: number) => {
+    sfx.select()
+    setHIdx(i)
+    if (HEADER[i] === 'search') onSearch()
+    else if (HEADER[i] === 'settings') onSettings()
+    else if (HEADER[i] === 'power') onPower()
+    else onTab(HEADER[i] as HomeTab)
+  }
   const pill = (i: number, content: ReactNode, active: boolean) => {
     const focused = zone === 'header' && hIdx === i
     return (
       <span
         key={i}
+        onClick={() => headerClick(i)}
+        onMouseEnter={() => (setZone('header'), setHIdx(i))}
         className={`flex h-[2.6rem] items-center gap-2 rounded-full px-[1.1rem] text-[0.95rem] font-medium transition-[transform,background-color,color] duration-200 ${
           focused ? 'scale-105 bg-white text-[rgb(12_12_14)]' : active ? 'bg-white/[0.14] text-white' : 'text-white/55'
         }`}
@@ -156,6 +166,8 @@ export function Home({
     return (
       <span
         key={i}
+        onClick={() => headerClick(i)}
+        onMouseEnter={() => (setZone('header'), setHIdx(i))}
         className={`flex size-[2.6rem] items-center justify-center rounded-full transition-[transform,background-color,color] duration-200 ${
           focused ? 'scale-110 bg-white text-[rgb(12_12_14)]' : 'bg-white/[0.08] text-white/70'
         }`}
@@ -224,6 +236,8 @@ export function Home({
                 ref={(el) => {
                   tiles.current[i] = el
                 }}
+                onClick={() => (sfx.select(), onOpenAlbum(a))}
+                onMouseEnter={() => (setZone('grid'), setIdx(i))}
                 className={`lift relative aspect-square rounded-[0.75rem] ${zone === 'grid' && i === idx ? 'is-focused' : ''}`}
               >
                 <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.12} eager={i < ALBUM_COLS * 3} className="size-full rounded-[0.75rem] text-[0.95rem]" />
@@ -242,6 +256,8 @@ export function Home({
                   ref={(el) => {
                     tiles.current[i] = el
                   }}
+                  onClick={() => (sfx.select(), onOpenArtist(a.artist))}
+                  onMouseEnter={() => (setZone('grid'), setIdx(i))}
                   className="flex flex-col items-center gap-3"
                 >
                   <div className={`lift relative aspect-square w-full rounded-full ${on ? 'is-focused' : ''}`}>
@@ -257,7 +273,9 @@ export function Home({
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[24vh] bg-gradient-to-t from-[rgb(9_9_11)] via-[rgb(9_9_11/0.8)] to-transparent" />
       <div className="absolute right-[4.5vw] bottom-[4.5vh] z-10">
-        <NowPlayingBar status={status} focused={zone === 'bar'} />
+        <div onClick={() => (sfx.select(), onNowPlaying())} onMouseEnter={() => setZone('bar')}>
+          <NowPlayingBar status={status} focused={zone === 'bar'} />
+        </div>
       </div>
     </div>
   )

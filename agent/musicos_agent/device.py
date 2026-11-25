@@ -85,38 +85,89 @@ def _wl_env():
     return env
 
 
-def display_modes():
-    """Connected outputs and the modes the TV/monitor offers."""
-    if DEV or not shutil.which("wlr-randr"):
-        return {"outputs": [{"name": "HDMI-A-1", "current": "3840x2160@60", "modes": [
-            "3840x2160@60", "3840x2160@30", "2560x1440@60", "1920x1080@60", "1920x1080@50", "1920x1080@24"]}], "demo": True}
+def _wlr_outputs():
+    """[(output, [(w, h, hz_exact_str, current)])] from wlr-randr."""
     r = subprocess.run(["wlr-randr"], capture_output=True, text=True, env=_wl_env(), timeout=10)
-    outputs, cur = [], None
+    outs, cur = [], None
     for line in r.stdout.splitlines():
         if line and not line.startswith(" "):
-            cur = {"name": line.split()[0], "current": "", "modes": []}
-            outputs.append(cur)
+            cur = (line.split()[0], [])
+            outs.append(cur)
         m = re.match(r"\s+(\d+)x(\d+) px, ([\d.]+) Hz(.*)", line)
         if m and cur is not None:
-            mode = "%sx%s@%d" % (m.group(1), m.group(2), round(float(m.group(3))))
-            if mode not in cur["modes"]:
-                cur["modes"].append(mode)
-            if "current" in m.group(4):
-                cur["current"] = mode
-    return {"outputs": outputs, "demo": False}
+            cur[1].append((int(m.group(1)), int(m.group(2)), m.group(3).rstrip("0").rstrip("."), "current" in m.group(4)))
+    return outs
+
+
+def _label(w, h, hz):
+    return "%dx%d@%d" % (w, h, round(float(hz)))
+
+
+def display_modes():
+    """Connected outputs and the modes the TV/monitor offers (labels like 1920x1080@60)."""
+    if DEV or not shutil.which("wlr-randr"):
+        return {"outputs": [{"name": "HDMI-A-1", "current": "3840x2160@24", "recommended": "2560x1440@60", "modes": [
+            "3840x2160@30", "3840x2160@25", "3840x2160@24", "2560x1440@60", "1920x1080@60", "1920x1080@50",
+            "1920x1080@24", "1280x720@60"]}], "demo": True}
+    out = []
+    for name, modes in _wlr_outputs():
+        labels, current = [], ""
+        for w, h, hz, cur in modes:
+            lab = _label(w, h, hz)
+            if lab not in labels:
+                labels.append(lab)
+            if cur:
+                current = lab
+        best = best_mode(modes)
+        out.append({"name": name, "current": current, "modes": labels,
+                    "recommended": _label(best[0], best[1], best[2]) if best else ""})
+    return {"outputs": out, "demo": False}
+
+
+def _apply(output, w, h, hz):
+    r = subprocess.run(["wlr-randr", "--output", output, "--mode", "%dx%d@%sHz" % (w, h, hz)],
+                       capture_output=True, text=True, env=_wl_env(), timeout=10)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or "mode change failed").strip())
 
 
 def set_display_mode(output, mode):
-    """Apply now (wlr-randr); the choice is saved in config and re-applied by musicos-session."""
+    """Apply now; the choice is saved in config and re-applied at startup (python3 -m ...device display)."""
     if not re.match(r"^[A-Za-z0-9-]+$", output or "") or not re.match(r"^\d+x\d+@\d+$", mode or ""):
         raise ValueError("invalid mode")
     if DEV or not shutil.which("wlr-randr"):
         return
-    res, hz = mode.split("@")
-    r = subprocess.run(["wlr-randr", "--output", output, "--mode", "%s@%sHz" % (res, hz)],
-                       capture_output=True, text=True, env=_wl_env(), timeout=10)
-    if r.returncode != 0:
-        raise RuntimeError((r.stderr or "mode change failed").strip())
+    for name, modes in _wlr_outputs():
+        if name != output:
+            continue
+        for w, h, hz, _ in modes:
+            if _label(w, h, hz) == mode:  # use the TV's exact refresh (59.951, not 60)
+                return _apply(output, w, h, hz)
+    raise ValueError("mode not offered by the display")
+
+
+def best_mode(modes):
+    """Smoothness first: the largest mode at >= 50 Hz (closest to 60), else the largest one."""
+    smooth = [m for m in modes if float(m[2]) >= 49.5]
+    pool = smooth or modes
+    return max(pool, key=lambda m: (m[0] * m[1], -abs(float(m[2]) - 60))) if pool else None
+
+
+def apply_startup_mode(saved=""):
+    """Run by musicos-browser when the compositor starts: saved mode, else best_mode()."""
+    if not shutil.which("wlr-randr"):
+        return
+    for name, modes in _wlr_outputs():
+        target = None
+        if saved:
+            target = next((m for m in modes if _label(m[0], m[1], m[2]) == saved), None)
+        target = target or best_mode(modes)
+        if target and not target[3]:
+            try:
+                _apply(name, target[0], target[1], target[2])
+                print("display %s -> %s" % (name, _label(target[0], target[1], target[2])))
+            except RuntimeError as e:
+                print("display %s: %s" % (name, e))
 
 
 # ---------------------------------------------------------------- Bluetooth (bluez via bluetoothctl)
@@ -271,3 +322,8 @@ def active_connections():
             method = run("nmcli", "-g", "ipv4.method", "connection", "show", name).strip()
             out.append({"name": name, "type": "ethernet" if parts[1] == "802-3-ethernet" else "wifi", "method": method})
     return out
+
+
+if __name__ == "__main__":  # musicos-browser: python3 -m musicos_agent.device display [saved-mode]
+    if len(sys.argv) >= 2 and sys.argv[1] == "display":
+        apply_startup_mode(sys.argv[2] if len(sys.argv) > 2 else "")

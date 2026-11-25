@@ -1,7 +1,7 @@
 import { Moon, Power, RotateCcw, TvMinimal, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { focusFirst, moveFocus, useRemote } from '../lib/keys'
+import { focusFirst, moveSpatial, useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 import { Row } from './ui'
 
@@ -17,8 +17,7 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
   useRemote((k) => {
     if (going) return true
     if (k === 'back' || k === 'power') return sfx.back(), onClose(), true
-    if (k === 'up' || k === 'left') return moveFocus(ref.current, -1) ? (sfx.tick(), true) : (sfx.edge(), true)
-    if (k === 'down' || k === 'right') return moveFocus(ref.current, 1) ? (sfx.tick(), true) : (sfx.edge(), true)
+    if (k === 'up' || k === 'down' || k === 'left' || k === 'right') return moveSpatial(ref.current, k) ? (sfx.tick(), true) : (sfx.edge(), true)
     return k !== 'ok' // OK goes to the focused row; everything else is swallowed by the sheet
   })
   const act = (action: 'shutdown' | 'reboot' | 'sleep' | 'tv-off', label: string) => async () => {

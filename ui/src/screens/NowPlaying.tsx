@@ -161,7 +161,9 @@ export function NowPlaying({
     return (
       <span
         key={c}
-        className={`flex items-center justify-center rounded-full transition-[transform,background-color,color,opacity] duration-300 ease-[var(--mo-spring)] ${big ? 'size-[4.4rem]' : 'size-[3.3rem]'} ${
+        onClick={() => activate(c)}
+        onMouseEnter={() => (setZone('controls'), setFocus(CONTROLS.indexOf(c)))}
+        className={`flex cursor-pointer items-center justify-center rounded-full transition-[transform,background-color,color,opacity] duration-300 ease-[var(--mo-spring)] ${big ? 'size-[4.4rem]' : 'size-[3.3rem]'} ${
           focused ? 'scale-110 bg-white text-[rgb(12_12_14)]' : c === 'lyrics' && lyricsOn ? 'bg-white/25 text-white' : 'bg-white/[0.08] text-white/80'
         } ${pressed === c ? 'scale-90' : ''} ${c === 'lyrics' && !lyrics ? 'opacity-30' : ''}`}
       >
@@ -211,7 +213,15 @@ export function NowPlaying({
 
           {/* scrubber: Up to focus, then left/right */}
           <div className={`max-w-[36rem] ${lyricsOn ? 'mt-6' : 'mt-10'}`}>
-            <div className="relative flex h-[1.4rem] items-center">
+            <div
+              className="relative flex h-[1.4rem] cursor-pointer items-center"
+              onMouseEnter={() => setZone('scrub')}
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                const to = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration
+                api.seek(to).catch(() => {})
+              }}
+            >
               <div
                 className="w-full overflow-hidden rounded-full bg-white/15 transition-[height] duration-300 ease-[var(--mo-spring)]"
                 style={{ height: scrubbing ? '0.55rem' : '0.3rem' }}

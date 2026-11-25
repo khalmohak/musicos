@@ -30,9 +30,17 @@ export function scrollToSmooth(el: HTMLElement, top: number, left: number | null
  *  (block) and/or horizontally (inline). */
 export function reveal(item: HTMLElement | null | undefined, opts: { block?: 'center' | 'nearest'; inline?: 'center' | 'nearest' } = {}) {
   if (!item) return
+  // only real scroll regions (overflow auto/scroll) -- never the page itself, or the whole
+  // screen shifts when something near the edge gets focus
   let c: HTMLElement | null = item.parentElement
-  while (c && !(c.scrollHeight > c.clientHeight + 1 || c.scrollWidth > c.clientWidth + 1)) c = c.parentElement
-  if (!c) return
+  while (c && c !== document.body) {
+    const st = getComputedStyle(c)
+    const scrollY = /(auto|scroll)/.test(st.overflowY) && c.scrollHeight > c.clientHeight + 1
+    const scrollX = /(auto|scroll)/.test(st.overflowX) && c.scrollWidth > c.clientWidth + 1
+    if ((opts.block && scrollY) || (opts.inline && scrollX)) break
+    c = c.parentElement
+  }
+  if (!c || c === document.body) return
   const cr = c.getBoundingClientRect()
   const ir = item.getBoundingClientRect()
   let top = c.scrollTop

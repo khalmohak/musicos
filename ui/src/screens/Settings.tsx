@@ -7,7 +7,7 @@ import { Row } from '../components/ui'
 import { PhotoBackdrop } from '../components/PhotoBackdrop'
 import { BACKDROPS } from '../lib/backgrounds'
 import { type Access, type Config, api } from '../lib/api'
-import { focusFirst, moveFocus, useRemote } from '../lib/keys'
+import { focusFirst, moveSpatial, useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 
 const SECTIONS = [
@@ -65,21 +65,24 @@ export function Settings({
       }
       return false
     }
-    if (k === 'left') {
-      setZone('nav')
-      nav.current?.querySelector<HTMLElement>(`[data-section="${section}"]`)?.focus()
-      sfx.tick()
-      return true
+    if (k === 'up' || k === 'down' || k === 'left' || k === 'right') {
+      if (moveSpatial(panel.current, k)) return sfx.tick(), true
+      if (k === 'left') {
+        setZone('nav')
+        nav.current?.querySelector<HTMLElement>(`[data-section="${section}"]`)?.focus({ preventScroll: true })
+        sfx.tick()
+        return true
+      }
+      return sfx.edge(), true
     }
-    if (k === 'up' || k === 'down') return moveFocus(panel.current, k === 'down' ? 1 : -1) ? (sfx.tick(), true) : (sfx.edge(), true)
     return false
   })
 
   return (
     <div className="tv relative flex h-full">
       <PhotoBackdrop index={1} dim={0.86} drift={false} />
-      <aside ref={nav} className="relative flex w-[24rem] shrink-0 flex-col gap-2 px-[3vw] pt-[6vh]">
-        <h1 className="mb-6 px-2 text-[2.1rem] font-semibold tracking-[-0.02em]">Settings</h1>
+      <aside ref={nav} className="no-scrollbar relative flex w-[27rem] shrink-0 flex-col gap-1.5 overflow-y-auto px-[3vw] pt-[7vh] pb-[6vh]">
+        <h1 className="mb-8 px-3 text-[2.3rem] font-semibold tracking-[-0.02em]">Settings</h1>
         {SECTIONS.map((s) => {
           const active = section === s.id
           return (
@@ -88,7 +91,13 @@ export function Settings({
               type="button"
               data-section={s.id}
               tabIndex={-1}
-              className={`flex items-center gap-4 rounded-[0.9rem] px-4 py-3 text-left text-[1rem] transition-[transform,background-color,color] duration-200 ${
+              onClick={() => {
+                sfx.tick()
+                setSection(s.id)
+                setZone('panel')
+                setTimeout(() => focusFirst(panel.current), 60)
+              }}
+              className={`flex items-center gap-4 rounded-[1rem] px-5 py-[0.95rem] text-left text-[1.05rem] transition-[transform,background-color,color] duration-300 ease-[var(--mo-spring)] ${
                 active && zone === 'nav'
                   ? 'scale-[1.03] bg-white text-[rgb(12_12_14)]'
                   : active
@@ -102,8 +111,11 @@ export function Settings({
           )
         })}
       </aside>
-      <section ref={panel} key={section} className="no-scrollbar mo-fade-in relative flex-1 overflow-y-auto px-[4vw] pt-[14vh] pb-[8vh]">
-        <div className="max-w-[44rem]">
+      <section ref={panel} key={section} className="no-scrollbar mo-fade-in relative flex-1 overflow-y-auto pt-[7vh] pr-[6vw] pb-[10vh] pl-[3vw]">
+        <div className="max-w-[54rem]">
+          <h2 className="mb-9 text-[2.3rem] font-semibold tracking-[-0.02em] text-white/90">
+            {SECTIONS.find((x) => x.id === section)?.label}
+          </h2>
           {section === 'audio' && <SoundPanel config={config} onConfig={onConfig} />}
           {section === 'network' && (
             <div className="flex flex-col gap-8">

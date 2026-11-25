@@ -53,17 +53,29 @@ REMOTE_KEYS = {
 
 
 def classify(dev):
-    """'pad', 'remote' or None (leave it alone)."""
+    """'pad', 'remote' or None (leave it alone).
+
+    Keyboards are never touched: many USB keyboards and wireless receivers advertise
+    every key code (gamepad buttons included), so "has BTN_SOUTH" alone is not a pad.
+    A pad needs gamepad buttons AND stick/d-pad axes, and must not look like a keyboard.
+    """
     if dev.name == "musicos-remote":
         return None
     caps = dev.capabilities()
     keys = set(caps.get(e.EV_KEY, []))
-    if e.BTN_SOUTH in keys or e.BTN_GAMEPAD in keys:
+    axes = {code for code, *_ in caps.get(e.EV_ABS, [])} if caps.get(e.EV_ABS) and isinstance(caps[e.EV_ABS][0], tuple) \
+        else set(caps.get(e.EV_ABS, []))
+    letters = sum(1 for k in (e.KEY_A, e.KEY_Q, e.KEY_Z, e.KEY_M, e.KEY_SPACE, e.KEY_ENTER, e.KEY_1) if k in keys)
+    is_keyboard = letters >= 4
+    if is_keyboard:
+        return None
+    has_pad_buttons = e.BTN_SOUTH in keys or e.BTN_GAMEPAD in keys
+    has_axes = bool(axes & {e.ABS_X, e.ABS_Y, e.ABS_HAT0X, e.ABS_HAT0Y}) or e.BTN_DPAD_UP in keys
+    if has_pad_buttons and has_axes:
         return "pad"
     name = dev.name.lower()
-    is_keyboard = e.KEY_A in keys and e.KEY_Z in keys
-    if not is_keyboard and ("cec" in name or " ir" in name or "remote" in name or "rc-" in name
-                            or e.KEY_OK in keys or e.KEY_SELECT in keys):
+    if "cec" in name or " ir" in name or name.endswith("-ir") or "remote" in name or "rc-" in name \
+            or ((e.KEY_OK in keys or e.KEY_SELECT in keys) and len(keys) < 120):
         return "remote"
     return None
 
@@ -166,7 +178,7 @@ class Pad:
 async def watch(path, kind, out):
     try:
         dev = InputDevice(path)
-        dev.grab()  # the browser must not also see the raw events
+        dev.grab()  # the browser must not also see the raw events (pads/remotes only)
     except OSError:
         return
     print("musicos-input: %s %s (%s)" % (kind, dev.name, path), flush=True)

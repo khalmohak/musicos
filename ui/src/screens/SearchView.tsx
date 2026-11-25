@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Cover } from '../components/Cover'
 import { OnScreenKeyboard } from '../components/OnScreenKeyboard'
 import { type Album, type SearchResult, type Status, albumKey, api, fmtTime } from '../lib/api'
-import { focusFirst, moveFocus, useRemote } from '../lib/keys'
+import { focusFirst, moveSpatial, useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 import { ArtistPortrait } from './Home'
 
@@ -44,21 +44,16 @@ export function SearchView({
       sfx.back()
       return true
     }
-    if (k === 'up' || k === 'left') {
-      const first = results.current?.querySelector<HTMLElement>('[data-nav]')
-      if (document.activeElement === first) {
-        if (k === 'left') {
-          setZone('keys')
-          first?.blur()
-          sfx.tick()
-        } else sfx.edge()
+    if (k === 'up' || k === 'down' || k === 'left' || k === 'right') {
+      if (moveSpatial(results.current, k)) return sfx.tick(), true
+      if (k === 'left') {
+        setZone('keys')
+        ;(document.activeElement as HTMLElement | null)?.blur()
+        sfx.tick()
         return true
       }
-      moveFocus(results.current, -1)
-      sfx.tick()
-      return true
+      return sfx.edge(), true
     }
-    if (k === 'down' || k === 'right') return moveFocus(results.current, 1) ? (sfx.tick(), true) : (sfx.edge(), true)
     return false
   })
 

@@ -31,11 +31,7 @@ if [ -z "${SKIP_BUILD:-}" ]; then
     step "sync repo -> $BUILD_HOST"
     rsync -az --delete --exclude .git --exclude out --exclude image/mkosi.cache --exclude image/mkosi.packages \
         --exclude ui/node_modules -e "$JUMP" ./ "$BUILD_HOST:musicos/"
-    if [ "${SPOTIFY:-1}" = 1 ]; then
-        $JUMP "$BUILD_HOST" 'cd musicos && ./scripts/fetch-spotify.sh' | sed 's/^/spotify package: /'
-    else
-        $JUMP "$BUILD_HOST" 'rm -f musicos/image/mkosi.packages/raspotify.deb'
-    fi
+    $JUMP "$BUILD_HOST" 'cd musicos && ./scripts/fetch-spotify.sh' | sed 's/^/spotify package: /'
 
     step "build image (log: $OUT/build.log)"
     start=$(date +%s)
@@ -105,6 +101,8 @@ for i in json.load(sys.stdin):
 echo "ip   $ip"
 if curl -fsS -m 5 "http://$ip:8080/api/status" >/dev/null; then
     echo "ok   agent API http://$ip:8080/api/status"
+    # never advertise AirPlay/Spotify as "musicos" from a test VM: phones would pick it
+    curl -s -m 5 -H "Content-Type: application/json" -d '{"name":"musicos-test-vm"}' "http://$ip:8080/api/receivers" >/dev/null
 else
     echo "FAIL agent API unreachable at $ip:8080"; fail=1
 fi

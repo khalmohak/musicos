@@ -14,8 +14,22 @@ g() {
     pve "qm guest exec $VMID --timeout ${2:-120} -- sh -c $(printf '%q' "$1")" \
         | python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("out-data","")+d.get("err-data","")).rstrip())'
 }
-api() {  # api METHOD PATH [JSON]
-    g "python3 -c \"import json,sys,urllib.request as u; r=u.Request('http://127.0.0.1:8080$2', $( [ -n "${3:-}" ] && printf "b'%s'" "$3" || echo None), {'Content-Type':'application/json'}); print(u.urlopen(r, timeout=60).read().decode())\""
+vm_ip() {
+    pve "qm guest cmd $VMID network-get-interfaces" | python3 -c '
+import json,sys
+for i in json.load(sys.stdin):
+    for a in i.get("ip-addresses", []):
+        if a["ip-address-type"] == "ipv4" and not a["ip-address"].startswith("127."):
+            print(a["ip-address"]); sys.exit()'
+}
+api() {  # api METHOD PATH [JSON] -- over the LAN from the Proxmox host, like the UI does
+    local ip body; ip=$(vm_ip); body="${3:-}"; [ -n "$body" ] || body='{}'
+    if [ "$1" = POST ]; then
+        pve "curl -s -m 60 -H 'Content-Type: application/json' -d '$body' http://$ip:8080$2"
+    else
+        pve "curl -s -m 60 http://$ip:8080$2"
+    fi
+    echo
 }
 
 # wait for a real restart: guest agent gone, then back with a fresh uptime

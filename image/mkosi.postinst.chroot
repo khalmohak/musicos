@@ -7,7 +7,7 @@ if ! id music >/dev/null 2>&1; then
     useradd --create-home --shell /bin/bash music
     echo 'music:music' | chpasswd
 fi
-for g in audio video render input sudo bluetooth; do
+for g in audio video render input sudo bluetooth systemd-journal; do
     getent group "$g" >/dev/null && usermod -aG "$g" music
 done
 
@@ -23,7 +23,7 @@ python3 -m compileall -q /usr/lib/musicos/agent
 mkdir -p /etc/kernel
 echo 3 > /etc/kernel/tries
 
-chmod 755 /usr/local/bin/musicos-browser /usr/local/bin/musicos-session /usr/local/bin/musicos-report /usr/local/lib/musicos/automount /usr/local/lib/musicos/receiver /usr/local/lib/musicos/receiver-spotify /usr/local/lib/musicos/cec
+chmod 755 /usr/local/bin/musicos-browser /usr/local/bin/musicos-session /usr/local/bin/musicos-report /usr/local/lib/musicos/automount /usr/local/lib/musicos/receiver /usr/local/lib/musicos/receiver-spotify /usr/local/lib/musicos/cec /usr/local/lib/musicos/install-update
 
 # Raspotify's own service would run a second librespot; musicos-spotify.service replaces it
 if [ -e /usr/lib/systemd/system/raspotify.service ] || [ -e /lib/systemd/system/raspotify.service ]; then

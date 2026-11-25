@@ -1,12 +1,7 @@
 # Installs the update staged in /var/lib/musicos/updates into the inactive /usr slot + ESP.
-# Status for the UI goes to /var/lib/musicos/update-status.json. Reboot is left to the user.
 [Unit]
 Description=Install musicos update (systemd-sysupdate)
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c 'st=/var/lib/musicos/update-status.json; \
-  echo "{\"state\":\"installing\"}" > $st; \
-  if /usr/lib/systemd/systemd-sysupdate --no-pager update > /var/lib/musicos/update.log 2>&1; then \
-    echo "{\"state\":\"installed\"}" > $st; else echo "{\"state\":\"failed\"}" > $st; fi; \
-  chmod 644 $st /var/lib/musicos/update.log'
+ExecStart=/usr/local/lib/musicos/install-update

@@ -2,7 +2,7 @@ import { Button } from '@glyphui/ui'
 import { AudioLines, ListMusic, Shuffle, Trash2 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { type QueueItem, type Status, api, coverUrl, fmtTime } from '../lib/api'
-import { moveFocus, useRemote } from '../lib/keys'
+import { moveSpatial, useRemote } from '../lib/keys'
 import { reveal } from '../lib/motion'
 import { sfx } from '../lib/sounds'
 
@@ -27,8 +27,7 @@ export function QueueView({ status, onBack, onPlayed }: { status: Status | null;
 
   useRemote((k) => {
     if (k === 'back') return sfx.back(), onBack(), true
-    if (k === 'up' || k === 'left') return moveFocus(ref.current, -1) ? (sfx.tick(), true) : (sfx.edge(), true)
-    if (k === 'down' || k === 'right') return moveFocus(ref.current, 1) ? (sfx.tick(), true) : (sfx.edge(), true)
+    if (k === 'up' || k === 'down' || k === 'left' || k === 'right') return moveSpatial(ref.current, k) ? (sfx.tick(), true) : (sfx.edge(), true)
     return false
   })
 

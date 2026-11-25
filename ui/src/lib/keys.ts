@@ -66,6 +66,56 @@ export function useRemote(handler: (k: RemoteKey, e: KeyboardEvent) => boolean |
   }, [enabled])
 }
 
+/**
+ * Spatial navigation (tvOS-style): move focus to the nearest [data-nav] element in the
+ * pressed direction, judged by on-screen position. Returns false at an edge.
+ */
+export function moveSpatial(root: HTMLElement | null, dir: 'up' | 'down' | 'left' | 'right') {
+  if (!root) return false
+  const items = [...root.querySelectorAll<HTMLElement>('[data-nav]:not([disabled])')].filter((el) => el.offsetParent !== null)
+  if (!items.length) return false
+  const cur = document.activeElement as HTMLElement
+  if (!items.includes(cur)) {
+    focusEl(items[0])
+    return true
+  }
+  const a = cur.getBoundingClientRect()
+  const ax = a.left + a.width / 2
+  const ay = a.top + a.height / 2
+  let best: HTMLElement | null = null
+  let bestScore = Infinity
+  for (const el of items) {
+    if (el === cur) continue
+    const b = el.getBoundingClientRect()
+    const bx = b.left + b.width / 2
+    const by = b.top + b.height / 2
+    const dx = bx - ax
+    const dy = by - ay
+    // must lie in the pressed direction (beyond our edge, with a little tolerance)
+    const ok =
+      dir === 'right' ? b.left >= a.right - 4 :
+      dir === 'left' ? b.right <= a.left + 4 :
+      dir === 'down' ? b.top >= a.bottom - 4 : b.bottom <= a.top + 4
+    if (!ok) continue
+    const along = dir === 'left' || dir === 'right' ? Math.abs(dx) : Math.abs(dy)
+    const across = dir === 'left' || dir === 'right' ? Math.abs(dy) : Math.abs(dx)
+    // prefer things straight ahead: sideways distance counts a lot more
+    const score = along + across * 2.5
+    if (score < bestScore) {
+      bestScore = score
+      best = el
+    }
+  }
+  if (!best) return false
+  focusEl(best)
+  return true
+}
+
+function focusEl(el: HTMLElement) {
+  el.focus({ preventScroll: true })
+  reveal(el, { block: 'nearest', inline: 'nearest' })
+}
+
 /** Move real DOM focus through the [data-nav] elements inside a container, in reading order. */
 export function moveFocus(root: HTMLElement | null, dir: 1 | -1) {
   if (!root) return false

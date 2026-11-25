@@ -29,6 +29,22 @@ def status():
     return s
 
 
+def _fetch_cover(url):
+    def run():
+        try:
+            import urllib.request
+            req = urllib.request.Request(url, headers={"User-Agent": "musicos/0.2"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                data = r.read()
+            if STATE.get("remoteCover") == url:  # still the same track
+                COVER["data"] = data
+                COVER["type"] = "image/png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
+                STATE["cover"] = "/api/receiver/cover?t=%d" % int(time.time() * 1000)
+        except Exception as e:
+            print("receiver cover: %s" % e, flush=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def event(b):
     """From the receiver hook script (localhost only)."""
     src, ev = b.get("source", ""), b.get("event", "")
@@ -42,15 +58,20 @@ def event(b):
         STATE["state"] = "play" if ev != "session_connected" else STATE["state"] or "pause"
     elif ev == "paused":
         STATE["state"] = "pause"
-    for k in ("title", "artist", "album", "cover", "device"):
+    for k in ("title", "artist", "album", "device"):
         if b.get(k):
             STATE[k] = b[k]
+    cover = b.get("cover") or ""
+    if cover.startswith("http") and cover != STATE.get("remoteCover"):
+        STATE["remoteCover"] = cover
+        _fetch_cover(cover)
     if b.get("duration"):
         STATE["duration"] = float(b["duration"])
     if "position" in b and ev in ("playing", "paused", "track_changed", "seeked"):
         STATE["position"] = float(b.get("position") or 0)
-    if src == "spotify" and ev == "track_changed":
+    if src == "spotify" and ev == "track_changed" and not cover:
         COVER["data"] = b""
+        STATE["cover"] = ""
 
 
 def release_for_local_playback():
@@ -82,12 +103,17 @@ def _airplay_reader():
                             buf = buf[-200000:]  # cover art can be large; keep a bounded tail
                             break
                         buf = buf[m.end():]
-                        typ = bytes.fromhex(m.group(1)).decode("latin-1")
-                        code = bytes.fromhex(m.group(2)).decode("latin-1")
-                        data = base64.b64decode(re.sub(r"\s", "", m.group(4) or "")) if m.group(4) else b""
-                        _airplay_item(typ, code, data)
-        except OSError:
-            time.sleep(5)
+                        try:
+                            typ = bytes.fromhex(m.group(1)).decode("latin-1")
+                            code = bytes.fromhex(m.group(2)).decode("latin-1")
+                            raw = re.sub(r"\s", "", m.group(4) or "")
+                            data = base64.b64decode(raw + "=" * (-len(raw) % 4)) if raw else b""
+                            _airplay_item(typ, code, data)
+                        except Exception as e:  # one odd item must not stop track info
+                            print("airplay metadata: skipped item: %s" % e, flush=True)
+        except Exception as e:
+            print("airplay metadata reader: %s" % e, flush=True)
+            time.sleep(3)
 
 
 def _airplay_item(typ, code, data):
@@ -100,11 +126,14 @@ def _airplay_item(typ, code, data):
         if code == "PICT" and data:
             COVER["data"] = data
             COVER["type"] = "image/png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg"
-            STATE["cover"] = "/api/receiver/cover?t=%d" % int(time.time())
+            STATE["cover"] = "/api/receiver/cover?t=%d" % int(time.time() * 1000)
         elif code == "pbeg":
             STATE.update(active=True, source="airplay", state="play", since=time.time())
         elif code == "pend":
-            STATE.update(active=False, state="")
+            STATE.update(active=False, state="", title="", artist="", album="", cover="")
+            COVER["data"] = b""
+        elif code == "mdst":  # a new track's metadata starts: clear the old one
+            STATE.update(title="", artist="", album="")
         elif code in ("pfls", "paus"):
             STATE["state"] = "pause"
         elif code in ("prsm", "pres"):
