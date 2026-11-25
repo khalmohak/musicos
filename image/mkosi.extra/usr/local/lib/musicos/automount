@@ -1,33 +1,62 @@
 #!/bin/sh
 # Called by udev for every new block device with a filesystem (see 90-musicos-drives.rules).
 # Mounts music drives under /srv/music on first access:
-#   USB drives        -> /srv/music/usb-<label>
-#   internal drives   -> /srv/music/disk-<label>
-# The disk we booted from, swap, LVM/RAID/LUKS members are ignored.
+#   USB drives        -> /srv/music/usb-<label>    (read-write)
+#   internal drives   -> /srv/music/disk-<label>   (read-only: never touch another OS's disk)
+# Skipped: the disk we booted from, EFI/Windows system partitions, swap, encrypted and
+# LVM/RAID members, optical media. Failures never block boot (automount, short timeout).
 set -u
 dev="$1"
 [ -b "$dev" ] || exit 0
+case "$(basename "$dev")" in dm-*|loop*|zram*|sr*) exit 0 ;; esac
+# run from musicos-automount@.service: load the device's udev properties (ID_FS_TYPE, ID_BUS...)
+if [ -z "${ID_FS_USAGE:-}" ]; then
+    eval "$(udevadm info --query=property --export "$dev" 2>/dev/null)"
+fi
+echo "automount: $dev type=${ID_FS_TYPE:-?} label=${ID_FS_LABEL:-} bus=${ID_BUS:-?}"
 [ "${ID_FS_USAGE:-}" = "filesystem" ] || exit 0
-case "${ID_FS_TYPE:-}" in ""|swap|LVM2_member|linux_raid_member|crypto_LUKS|iso9660|udf) exit 0 ;; esac
+case "${ID_FS_TYPE:-}" in
+    ""|swap|LVM2_member|linux_raid_member|crypto_LUKS|BitLocker|bitlocker|iso9660|udf|squashfs|erofs|DM_verity_hash) exit 0 ;;
+esac
 
+# GPT/MBR partition types that are never music: EFI system, Microsoft reserved,
+# Windows recovery, BIOS boot, Linux /boot (XBOOTLDR)
+ptype=$(printf '%s' "${ID_PART_ENTRY_TYPE:-}" | tr 'A-Z' 'a-z')
+case "$ptype" in
+    c12a7328-f81f-11d2-ba4b-00a0c93ec93b|e3c9e316-0b5c-4db8-817d-f92df00215ae|\
+    de94bba4-06d1-4d40-a16a-bfd50179d6ac|21686148-6449-6e6f-744e-656564454649|\
+    bc13c2ff-59e6-4262-a352-b275fd6f7172|0xef|0x27) exit 0 ;;
+esac
+
+# the disk musicos itself runs from (USB stick or SSD)
 root_src=$(findmnt -no SOURCE / 2>/dev/null)
 root_disk=$(lsblk -no PKNAME "$root_src" 2>/dev/null | head -1)
 this_disk=$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)
 [ -n "$root_disk" ] && [ "$this_disk" = "$root_disk" ] && exit 0
 
+# small FAT partitions on internal disks are boot/vendor partitions
+size=$(lsblk -bdno SIZE "$dev" 2>/dev/null || echo 0)
+if [ "${ID_BUS:-}" != usb ] && [ "$ID_FS_TYPE" = vfat ] && [ "${size:-0}" -lt 2000000000 ]; then
+    exit 0
+fi
+
 prefix=disk
 [ "${ID_BUS:-}" = "usb" ] && prefix=usb
 name=$(printf '%s' "${ID_FS_LABEL:-${ID_FS_UUID:-drive}}" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)
 where="/srv/music/$prefix-$name"
+findmnt -rno TARGET "$where" >/dev/null 2>&1 && exit 0
 
 opts="nosuid,nodev,noexec,noatime"
+[ "$prefix" = disk ] && opts="$opts,ro"
 type=""
 uid=$(id -u music 2>/dev/null || echo 1000)
 gid=$(getent group audio | cut -d: -f3)
 case "$ID_FS_TYPE" in
     vfat|exfat) opts="$opts,uid=$uid,gid=$gid,umask=0002" ;;
-    ntfs|ntfs3) opts="$opts,uid=$uid,gid=$gid,umask=0002"; type="--type=ntfs3" ;;
+    # ntfs3 refuses volumes Windows left hibernated (Fast Startup) unless read-only
+    ntfs|ntfs3) opts="$opts,ro,uid=$uid,gid=$gid,umask=0022"; type="--type=ntfs3" ;;
 esac
 
 # shellcheck disable=SC2086
-exec /usr/bin/systemd-mount --no-block --automount=yes --collect --options="$opts" $type "$dev" "$where"
+exec /usr/bin/systemd-mount --no-block --automount=yes --collect \
+    --property=TimeoutSec=15 --options="$opts" $type "$dev" "$where"

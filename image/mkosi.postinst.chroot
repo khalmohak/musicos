@@ -7,33 +7,47 @@ if ! id music >/dev/null 2>&1; then
     useradd --create-home --shell /bin/bash music
     echo 'music:music' | chpasswd
 fi
-for g in audio video render input sudo; do
+for g in audio video render input sudo bluetooth; do
     getent group "$g" >/dev/null && usermod -aG "$g" music
 done
 
-# music library root; /srv/music/local is for files copied onto the device
-mkdir -p /srv/music/local
-chown music:audio /srv/music/local
-chmod 2775 /srv/music/local
+# Directories and the default MPD output live on the writable root partition; tmpfiles.d
+# (/usr/lib/tmpfiles.d/musicos.conf) recreates them at boot if they're ever missing.
+systemd-tmpfiles --create /usr/lib/tmpfiles.d/musicos.conf
 
-# agent state (settings, sources, cover cache); readable so MPD can include the output config
-install -d -o music -g music -m 0755 /var/lib/musicos
-if [ ! -f /var/lib/musicos/mpd-output.conf ]; then
-    cat > /var/lib/musicos/mpd-output.conf <<'EOF'
-audio_output {
-    type        "alsa"
-    name        "musicos"
-    device      "default"
-    mixer_type  "software"
-}
-EOF
+# Python can't write .pyc files into the read-only /usr at runtime: compile them now
+python3 -m compileall -q /usr/lib/musicos/agent
+
+# Boot counting: new versions get 3 tries; systemd-bless-boot marks a version good once
+# boot-complete.target is reached, otherwise systemd-boot falls back to the previous one.
+mkdir -p /etc/kernel
+echo 3 > /etc/kernel/tries
+
+chmod 755 /usr/local/bin/musicos-browser /usr/local/bin/musicos-session /usr/local/bin/musicos-report /usr/local/lib/musicos/automount /usr/local/lib/musicos/receiver /usr/local/lib/musicos/receiver-spotify /usr/local/lib/musicos/cec
+
+# Raspotify's own service would run a second librespot; musicos-spotify.service replaces it
+if [ -e /usr/lib/systemd/system/raspotify.service ] || [ -e /lib/systemd/system/raspotify.service ]; then
+    systemctl disable raspotify.service raspotify-crash-report-generator.service 2>/dev/null || true
+    systemctl mask raspotify.service raspotify-crash-report-generator.service
 fi
-install -d -m 0700 /etc/musicos/creds
 
-chmod 755 /usr/local/bin/musicos-browser
+# Distro services: enabled once, the links live in /etc on the persistent root.
+systemctl enable NetworkManager systemd-resolved systemd-timesyncd avahi-daemon ssh mpd bluetooth bluealsa shairport-sync
 
-systemctl enable NetworkManager systemd-resolved systemd-timesyncd avahi-daemon ssh mpd \
-    musicos-agent musicos-kiosk musicos-apply.path musicos-apply.service
-# NetworkManager owns networking; networkd's wait-online would stall boot for 2 minutes
-systemctl disable systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service 2>/dev/null || true
+# musicos services: enabled from /usr (static .wants links), so services added or removed by
+# an update take effect without touching /etc.
+static_enable() {  # unit target
+    mkdir -p "/usr/lib/systemd/system/$2.wants"
+    ln -sf "../$1" "/usr/lib/systemd/system/$2.wants/$1"
+}
+for u in musicos-agent.service musicos-apply.path musicos-apply.service musicos-input.service \
+         musicos-report.path musicos-update.path musicos-spotify.service; do
+    [ -e "/usr/lib/systemd/system/$u" ] && static_enable "$u" multi-user.target
+done
+static_enable musicos-kiosk.service graphical.target
+static_enable musicos-report.timer timers.target
+# NetworkManager owns networking. networkd's wait-online would block network-online.target
+# forever (and with it multi-user.target and boot-complete, so A/B updates would never be
+# marked good). Mask, not disable: mkosi's preset step re-enables disabled units.
+systemctl mask systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service
 systemctl set-default graphical.target

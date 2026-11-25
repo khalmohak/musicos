@@ -19,7 +19,7 @@ def _split(name):
 
 class MockClient:
     def __init__(self):
-        self.queue, self.pos, self.state, self.volume = [], 0, "stop", 60
+        self._q, self.pos, self.state, self.volume = [], 0, "stop", 60
         self.started, self.offset = 0.0, 0.0
 
     def artists(self):
@@ -54,30 +54,52 @@ class MockClient:
     def albumart(self, uri):
         return None
 
+    def queue(self):
+        return [{"pos": i, "file": t["file"], "title": t["title"], "artist": t["_artist"], "album": t["_album"],
+                 "duration": 240.0, "current": i == self.pos} for i, t in enumerate(self._q)]
+
+    def play_pos(self, pos):
+        self.pos, self.state, self.started, self.offset = int(pos), "play", time.time(), 0.0
+
+    def enqueue_album(self, artist, album, mode="end"):
+        self._q += self.tracks(artist, album)
+
+    def shuffle_play(self, artist=None, album=None):
+        self._q = [t for a in self.all_albums() if not artist or a["artist"] == artist
+                      for t in self.tracks(a["artist"], a["album"])]
+        self.play_pos(0)
+
+    def clear_queue(self):
+        self._q, self.state = [], "stop"
+
+    def search(self, q, limit=200):
+        from .mpd import group_search
+        return group_search(q, [], self.all_albums())
+
     def update(self):
         pass
 
     def _elapsed(self):
         e = self.offset + (time.time() - self.started if self.state == "play" else 0)
-        if e >= 240 and self.queue:  # auto-advance
-            self.pos = (self.pos + 1) % len(self.queue)
+        if e >= 240 and self._q:  # auto-advance
+            self.pos = (self.pos + 1) % len(self._q)
             self.started, self.offset = time.time(), 0.0
             e = 0.0
         return e
 
     def status(self):
-        song = self.queue[self.pos] if self.queue and self.state != "stop" else None
+        song = self._q[self.pos] if self._q and self.state != "stop" else None
         return {"state": self.state, "volume": self.volume, "elapsed": self._elapsed() if song else 0,
                 "duration": 240.0 if song else 0,
                 "song": None if not song else {"file": song["file"], "title": song["title"],
                                                "artist": song["_artist"], "album": song["_album"]}}
 
     def play_album(self, artist, album, pos=0):
-        self.queue, self.pos = self.tracks(artist, album), int(pos)
+        self._q, self.pos = self.tracks(artist, album), int(pos)
         self.state, self.started, self.offset = "play", time.time(), 0.0
 
     def control(self, action):
-        if not self.queue:
+        if not self._q:
             return
         if action in ("toggle", "pause", "play"):
             if self.state == "play" and action != "play":
@@ -85,10 +107,13 @@ class MockClient:
             elif action != "pause":
                 self.state, self.started = "play", time.time()
         elif action in ("next", "previous"):
-            self.pos = (self.pos + (1 if action == "next" else -1)) % len(self.queue)
+            self.pos = (self.pos + (1 if action == "next" else -1)) % len(self._q)
             self.started, self.offset, self.state = time.time(), 0.0, "play"
         elif action == "stop":
             self.state, self.offset = "stop", 0.0
+
+    def seek(self, seconds):
+        self.offset, self.started = max(0.0, float(seconds)), time.time()
 
     def set_volume(self, volume):
         self.volume = max(0, min(100, int(volume)))

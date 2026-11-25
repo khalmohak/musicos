@@ -15,6 +15,8 @@
   --mo-accent: 120 120 130; /* follows the album in focus; set by lib/color.ts */
   --mo-bg: 9 9 11;
   --mo-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* focus lift: a touch of overshoot, like tvOS */
+  --mo-spring: cubic-bezier(0.25, 0.9, 0.3, 1.18);
   color-scheme: dark;
   /* rem drives everything (Glyph too) and tracks the screen: 24px at 1080p, 48px at 4K,
      so layouts are identical at any resolution and text stays sharp */
@@ -45,7 +47,7 @@ body {
 
 /* lift: the tvOS "this is what OK will do" */
 .lift {
-  transition: transform 260ms var(--mo-ease);
+  transition: transform 320ms var(--mo-spring);
   will-change: transform;
 }
 .lift::after {
@@ -97,6 +99,7 @@ body {
 
 /* rows in lists (outputs, sources, tracks) */
 .row {
+  transition-timing-function: var(--mo-spring) !important;
   display: flex;
   align-items: center;
   gap: 1.1rem;
@@ -190,4 +193,65 @@ body {
   text-transform: uppercase;
   color: rgb(255 255 255 / 0.5);
   font-weight: 500;
+}
+
+/* screensaver: a very slow pan across the cover wall */
+@keyframes mo-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(-4%, -6%, 0) scale(1.1);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+}
+.mo-drift {
+  animation: mo-drift 180s ease-in-out infinite;
+}
+
+/* screen transitions: every screen fades and settles in */
+@keyframes mo-page {
+  from {
+    opacity: 0;
+    transform: scale(1.015);
+  }
+}
+.mo-page {
+  height: 100%;
+  animation: mo-page 420ms var(--mo-ease) both;
+}
+/* crossfade for content that changes in place (track title, cover) */
+@keyframes mo-xfade {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem);
+  }
+}
+.mo-xfade {
+  animation: mo-xfade 480ms var(--mo-ease) both;
+}
+
+/* photo backdrops */
+@keyframes mo-photo-in {
+  from {
+    opacity: 0;
+  }
+}
+.mo-photo {
+  animation: mo-photo-in 1200ms ease both;
+}
+@keyframes mo-kenburns {
+  from {
+    transform: scale(1.08) translate3d(-1%, -1%, 0);
+  }
+  to {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+}
+.mo-kenburns {
+  animation:
+    mo-photo-in 1200ms ease both,
+    mo-kenburns 40s ease-out both;
 }

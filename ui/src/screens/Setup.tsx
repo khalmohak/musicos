@@ -1,19 +1,20 @@
 import { Button } from '@glyphui/ui'
 import {
-  ArrowRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, CircleCheck, Library, Pause, Speaker,
+  ArrowRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, CircleCheck, Clock, Library, Pause, Speaker,
   UserRound, Wifi,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { OnScreenKeyboard } from '../components/OnScreenKeyboard'
-import { AccessCard, LibraryPanel, NetworkPanel, SoundPanel } from '../components/panels'
+import { AccessCard, LibraryPanel, NetworkPanel, SoundPanel, TimezonePicker } from '../components/panels'
 import { Record, Wordmark } from '../components/Record'
 import { RemoteIcon } from '../components/icons'
+import { PhotoBackdrop } from '../components/PhotoBackdrop'
 import { PageDots, StepShell } from '../components/ui'
 import { type Config, api } from '../lib/api'
 import { focusFirst, moveFocus, useRemote } from '../lib/keys'
 import { primeAudio, sfx } from '../lib/sounds'
 
-const STEPS = ['welcome', 'you', 'network', 'sound', 'music', 'remote', 'ready'] as const
+const STEPS = ['welcome', 'you', 'time', 'network', 'sound', 'music', 'remote', 'ready'] as const
 const ICON = 'size-[2.1rem] text-white/85'
 
 export function Setup({ config: initial, onDone }: { config: Config; onDone: (c: Config) => void }) {
@@ -60,7 +61,7 @@ export function Setup({ config: initial, onDone }: { config: Config; onDone: (c:
 
   return (
     <div className="tv relative flex h-full flex-col">
-      <div className="mo-ambient" />
+      <PhotoBackdrop index={step} dim={id === 'welcome' ? 0.55 : 0.8} />
       <header className="relative flex h-[12vh] items-center justify-between px-[5vw]">
         <div className="flex items-center gap-3">
           <Record size="1.9rem" spinning={false} />
@@ -92,6 +93,12 @@ export function Setup({ config: initial, onDone }: { config: Config; onDone: (c:
               </div>
               <OnScreenKeyboard value={name} onChange={setName} onDone={() => go(1)} maxLength={24} />
             </div>
+          </StepShell>
+        )}
+
+        {id === 'time' && (
+          <StepShell split actions={nextButton()} icon={<Clock className={ICON} strokeWidth={1.5} />} title="Where are you?" sub="For the clock, greetings and the screensaver. Pick your region, then your city.">
+            <TimezonePicker onDone={() => setTimeout(() => go(1), 400)} />
           </StepShell>
         )}
 
@@ -164,7 +171,7 @@ function RemoteStep({ onNext }: { onNext: () => void }) {
     <StepShell
       icon={<RemoteIcon className={ICON} strokeWidth={1.5} />}
       title="Try your remote"
-      sub="Press each button. Any IR or HDMI-CEC remote works, and so does a keyboard. Press OK twice to continue."
+      sub="Press each button. Game controllers, IR and HDMI-CEC remotes and keyboards all work. Bluetooth controllers pair in Settings → Bluetooth. Press OK twice to continue."
     >
       <div className="flex flex-col items-center gap-6">
         <div className="grid grid-cols-3 grid-rows-3 gap-3">

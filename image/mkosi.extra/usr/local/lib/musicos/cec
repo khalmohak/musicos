@@ -1,0 +1,25 @@
+#!/bin/sh
+# HDMI-CEC helper.
+#   cec setup [dev]   claim a "playback device" address so the TV sends us its remote's buttons
+#   cec wake          turn the TV on and switch it to our input (called when playback starts)
+#   cec standby       put the TV to sleep
+# Remote buttons arrive as normal input events, handled by musicos-input.
+set -u
+action="${1:-setup}"
+devs="${2:-$(ls /dev/cec* 2>/dev/null)}"
+[ -n "$devs" ] || exit 0
+for dev in $devs; do
+    [ -e "$dev" ] || continue
+    case "$action" in
+        setup)
+            cec-ctl -d "$dev" --playback --osd-name musicos >/dev/null 2>&1 ;;
+        wake)
+            pa=$(cec-ctl -d "$dev" 2>/dev/null | sed -n 's/.*Physical Address *: *\([0-9a-f.]*\).*/\1/p' | head -1)
+            cec-ctl -d "$dev" --to 0 --image-view-on >/dev/null 2>&1
+            [ -n "$pa" ] && [ "$pa" != "f.f.f.f" ] && \
+                cec-ctl -d "$dev" --to 15 --active-source "phys-addr=$pa" >/dev/null 2>&1 ;;
+        standby)
+            cec-ctl -d "$dev" --to 0 --standby >/dev/null 2>&1 ;;
+    esac
+done
+exit 0

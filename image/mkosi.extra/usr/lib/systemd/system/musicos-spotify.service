@@ -1,0 +1,22 @@
+# Spotify Connect receiver (librespot). Shows up in the Spotify app as RECEIVER_NAME; no login
+# needed on the box (zeroconf). Audio goes to ALSA "default" like everything else.
+[Unit]
+Description=musicos Spotify Connect (librespot)
+After=network-online.target sound.target musicos-apply.service avahi-daemon.service
+Wants=network-online.target
+ConditionPathExists=/usr/bin/librespot
+
+[Service]
+User=music
+Group=audio
+EnvironmentFile=/usr/share/musicos/receivers.env
+EnvironmentFile=-/etc/musicos/receivers.env
+ExecStart=/usr/bin/librespot --name ${RECEIVER_NAME} --device-type avr --backend alsa --device default \
+    --bitrate 320 --initial-volume 70 --enable-volume-normalisation --autoplay on \
+    --cache /var/cache/musicos-spotify --disable-audio-cache \
+    --zeroconf-backend avahi --onevent /usr/local/lib/musicos/receiver-spotify
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

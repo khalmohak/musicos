@@ -1,0 +1,9 @@
+# Writes a diagnostics report to /var/lib/musicos/report.txt (shown in Settings > About) and to
+# the boot partition as musicos-report.txt, which any computer can read from the USB stick.
+[Unit]
+Description=musicos diagnostics report
+After=musicos-kiosk.service NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '/usr/local/bin/musicos-report > /var/lib/musicos/report.txt 2>&1; chmod 644 /var/lib/musicos/report.txt; esp=$(bootctl --print-esp-path 2>/dev/null || echo /boot); cp /var/lib/musicos/report.txt "$esp/musicos-report.txt" 2>/dev/null || true'

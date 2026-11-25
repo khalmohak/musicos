@@ -12,7 +12,7 @@ import re
 import shutil
 import subprocess
 
-from . import config
+from . import audio, config
 
 UNIT_DIR = "/etc/systemd/system"
 CRED_DIR = "/etc/musicos/creds"
@@ -20,7 +20,7 @@ MUSIC_ROOT = "/srv/music"
 SAFE_ID = re.compile(r"^[a-z0-9-]{1,24}$")
 SAFE_HOST = re.compile(r"^[A-Za-z0-9.\-:]+$")
 SAFE_PATH = re.compile(r"^[^\n\r\0\"]*$")
-SAFE_DEVICE = re.compile(r"^(default|(plug)?hw:CARD=[A-Za-z0-9_]+,DEV=\d+)$")
+SAFE_DEVICE = re.compile(r"^(default|(plug)?hw:CARD=[A-Za-z0-9_]+,DEV=\d+|bluealsa:DEV=([0-9A-F]{2}:){5}[0-9A-F]{2},PROFILE=a2dp)$")
 
 
 def sh(*cmd):
@@ -87,41 +87,31 @@ def apply_mounts():
         sh("systemctl", "start", "--no-block", base + ".automount")
 
 
-def playback_cards():
-    """[(index, id)] of sound cards that can play, from /proc/asound."""
-    cards, ids = [], {}
-    try:
-        for line in open("/proc/asound/cards"):
-            line = line.strip()
-            if line and line[0].isdigit() and "[" in line:
-                ids[line.split()[0]] = line.split("[", 1)[1].split("]", 1)[0].strip()
-        for line in open("/proc/asound/pcm"):
-            if "playback" in line:
-                idx = str(int(line.split("-", 1)[0]))
-                if (idx, ids.get(idx, idx)) not in cards:
-                    cards.append((idx, ids.get(idx, idx)))
-    except OSError:
-        pass
-    return cards
-
-
 def apply_alsa_default(device):
-    """Point ALSA's "default" at the chosen card (or the first real one): card 0 isn't always it.
-    Interface sounds and "System default" both go through this. Returns True if it changed."""
-    cards = playback_cards()
-    if not cards:
+    """Route ALSA "default" (interface sounds, MPD's "System default") to the chosen device, or
+    for "default" to whatever has a display/DAC attached, unmuting it. True if anything changed."""
+    devs = audio.devices()
+    if not devs:
         return False
-    want = None
-    m = re.search(r"CARD=([A-Za-z0-9_]+)", device)
+    target = None
+    m = re.search(r"CARD=([A-Za-z0-9_]+),DEV=(\d+)", device)
     if m:
-        want = next((i for i, cid in cards if cid == m.group(1)), None)
-    idx = want or cards[0][0]
-    text = "# written by musicos-apply\ndefaults.pcm.card %s\ndefaults.ctl.card %s\n" % (idx, idx)
+        target = next((d for d in devs if d["cardId"] == m.group(1) and d["dev"] == int(m.group(2))), None)
+    target = target or audio.best_default(devs)
+    audio.unmute(target["card"])
+    text = audio.asound_conf(target)
     old = open("/etc/asound.conf").read() if os.path.exists("/etc/asound.conf") else ""
     if text == old:
         return False
     write("/etc/asound.conf", text)
+    print("audio default -> %s" % target["id"])
     return True
+
+
+def apply_network():
+    """Wi-Fi radios can boot soft-blocked; make sure NetworkManager may use them."""
+    sh("rfkill", "unblock", "wifi")
+    sh("nmcli", "radio", "wifi", "on")
 
 
 def apply_audio():
@@ -132,7 +122,7 @@ def apply_audio():
         device = "default"
     lines = ['audio_output {', '    type        "alsa"', '    name        "musicos"',
              '    device      "%s"' % device]
-    if cfg.get("bitPerfect") and device != "default":
+    if cfg.get("bitPerfect") and device != "default" and not device.startswith("bluealsa"):
         # straight to the DAC: no software volume, no resampling, no format conversion
         lines += ['    mixer_type  "none"', '    auto_resample "no"', '    auto_channels "no"',
                   '    auto_format "no"', '    dop "yes"']
@@ -149,7 +139,30 @@ def apply_audio():
         sh("systemctl", "try-restart", "--no-block", "mpd")
 
 
+def apply_receivers():
+    """Spotify Connect / AirPlay on or off, and the name phones see."""
+    cfg = config.load()
+    name = re.sub(r"[^A-Za-z0-9 ._-]", "", cfg.get("receiverName") or "musicos").strip()[:40] or "musicos"
+    env = 'RECEIVER_NAME="%s"\n' % name  # ${RECEIVER_NAME} in ExecStart keeps it one argument
+    path = "/etc/musicos/receivers.env"
+    old = open(path).read() if os.path.exists(path) else ""
+    renamed = env != old
+    if renamed:
+        os.makedirs("/etc/musicos", exist_ok=True)
+        write(path, env)
+    for key, unit in (("airplay", "shairport-sync.service"), ("spotify", "musicos-spotify.service")):
+        on = cfg.get(key, True)
+        if on:
+            sh("systemctl", "unmask", unit)
+            sh("systemctl", "restart" if renamed else "start", "--no-block", unit)
+        else:
+            sh("systemctl", "stop", "--no-block", unit)
+            sh("systemctl", "mask", "--runtime", unit)
+
+
 def main():
+    apply_network()
+    apply_receivers()
     apply_audio()
     apply_mounts()
     # rescan so new shares show up, but only if MPD is already up: at boot MPD waits for us,

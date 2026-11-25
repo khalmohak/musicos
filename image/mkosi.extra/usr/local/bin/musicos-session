@@ -1,0 +1,68 @@
+#!/bin/sh
+# Starts cage on real hardware, robustly. Run by musicos-kiosk.service as the music user.
+#
+# 1. Wait for a real GPU driver (not the firmware framebuffer "simpledrm", which vanishes when
+#    the real driver loads) with a connected screen.
+# 2. With several GPUs (e.g. Ryzen iGPU + GTX 1650), use the one the screen is plugged into,
+#    preferring amdgpu/i915 over nouveau if screens hang off both.
+# 3. If cage dies within seconds (GPU without working 3D), retry with software rendering.
+#    The fallback sticks until reboot.
+STATE="${RUNTIME_DIRECTORY:-/tmp}"
+FALLBACK="$STATE/software-rendering"
+log() { echo "musicos-session: $*" >&2; }
+
+driver_of() { basename "$(readlink -f "/sys/class/drm/$1/device/driver" 2>/dev/null)"; }
+
+pick_card() {
+    best="" best_rank=99
+    for st in /sys/class/drm/card*-*/status; do
+        [ -e "$st" ] || continue
+        [ "$(cat "$st")" = connected ] || continue
+        conn=$(basename "$(dirname "$st")")      # card1-HDMI-A-1
+        card=${conn%%-*}                          # card1
+        drv=$(driver_of "$card")
+        case "$drv" in
+            simpledrm|efidrm|vesadrm) continue ;;
+            amdgpu|i915|xe|radeon) rank=1 ;;
+            nouveau) rank=2 ;;
+            *) rank=3 ;;
+        esac
+        if [ "$rank" -lt "$best_rank" ]; then best=$card best_rank=$rank; fi
+    done
+    echo "$best"
+}
+
+card=""
+i=0
+while [ $i -lt 40 ]; do                           # up to 20 s for GPU drivers + screen
+    card=$(pick_card)
+    [ -n "$card" ] && break
+    i=$((i + 1))
+    sleep 0.5
+done
+
+if [ -n "$card" ]; then
+    export WLR_DRM_DEVICES="/dev/dri/$card"
+    log "using $card ($(driver_of "$card")) for the screen"
+else
+    log "no connected screen on a real GPU yet; letting wlroots choose"
+fi
+
+for c in /sys/class/drm/card*-*/status; do
+    [ -e "$c" ] && log "  $(basename "$(dirname "$c")"): $(cat "$c") [$(driver_of "$(basename "$(dirname "$c")" | cut -d- -f1)")]"
+done
+
+if [ -e "$FALLBACK" ]; then
+    export WLR_RENDERER=pixman
+    log "software rendering (GPU 3D failed earlier this boot)"
+fi
+
+start=$(date +%s)
+/usr/bin/cage -s -- /usr/local/bin/musicos-browser
+rc=$?
+ran=$(( $(date +%s) - start ))
+if [ $rc -ne 0 ] && [ $ran -lt 15 ] && [ ! -e "$FALLBACK" ]; then
+    log "cage exited ($rc) after ${ran}s; switching to software rendering"
+    touch "$FALLBACK"
+fi
+exit $rc

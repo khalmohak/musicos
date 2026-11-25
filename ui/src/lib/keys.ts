@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
+import { reveal } from './motion'
 
 /** Remote-control vocabulary. Keyboards, IR/CEC remotes (via the kernel) and gamepads all map here. */
 export type RemoteKey =
   | 'up' | 'down' | 'left' | 'right' | 'ok' | 'back'
   | 'playpause' | 'next' | 'prev' | 'volup' | 'voldown' | 'menu'
+  | 'settings' | 'search' | 'home' | 'stop' | 'power'
 
 const MAP: Record<string, RemoteKey> = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
@@ -14,32 +16,53 @@ const MAP: Record<string, RemoteKey> = {
   AudioVolumeUp: 'volup', '+': 'volup', '=': 'volup',
   AudioVolumeDown: 'voldown', '-': 'voldown',
   ContextMenu: 'menu', m: 'menu', Info: 'menu',
+  // controller / remote buttons arrive as function keys from musicos-input (see inputd.py)
+  F1: 'menu', F2: 'settings', F3: 'search', F4: 'home', BrowserHome: 'home', GoHome: 'home',
+  BrowserSearch: 'search', MediaStop: 'stop', F5: 'power', Power: 'power',
 }
 
 export const toRemote = (e: KeyboardEvent): RemoteKey | undefined => MAP[e.key]
 
+type Handler = { fn: (k: RemoteKey, e: KeyboardEvent) => boolean | void }
+/** Handlers in the order they became active; the newest (a keyboard, a picker, a menu) gets
+ * each key first and the screen behind it only sees keys it didn't handle. */
+const stack: Handler[] = []
+let installed = false
+
+function dispatch(e: KeyboardEvent) {
+  if (e.defaultPrevented) return
+  const target = e.target as HTMLElement | null
+  const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
+  if (typing && e.key.length === 1) return // let text fields receive characters
+  const k = toRemote(e)
+  // unmapped keys (letters for on-screen keyboards) still go to handlers, as k=undefined
+  for (let i = stack.length - 1; i >= 0; i--) {
+    if (stack[i].fn(k as RemoteKey, e)) {
+      e.preventDefault()
+      return
+    }
+  }
+}
+
 /**
- * Subscribe the current screen to remote keys. Return true from the handler to mark the
- * key as handled (prevents default scrolling / typing).
+ * Subscribe a screen or overlay to remote keys. Return true when the key is handled.
+ * Becoming active (mount, or `enabled` turning true) puts it on top of the stack.
  */
 export function useRemote(handler: (k: RemoteKey, e: KeyboardEvent) => boolean | void, enabled = true) {
   const ref = useRef(handler)
   ref.current = handler
   useEffect(() => {
     if (!enabled) return
-    const onKey = (e: KeyboardEvent) => {
-      // nested components subscribe first (child effects run before parent effects), so a
-      // handled key never reaches the screen behind, e.g. Back closing a keyboard, not setup
-      if (e.defaultPrevented) return
-      const target = e.target as HTMLElement | null
-      const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')
-      if (typing && e.key.length === 1) return // let text fields receive characters
-      const k = toRemote(e)
-      if (!k) return
-      if (ref.current(k, e)) e.preventDefault()
+    if (!installed) {
+      window.addEventListener('keydown', dispatch)
+      installed = true
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    const h: Handler = { fn: (k, e) => (k === undefined && e.key.length !== 1 ? false : ref.current(k, e)) }
+    stack.push(h)
+    return () => {
+      const i = stack.indexOf(h)
+      if (i >= 0) stack.splice(i, 1)
+    }
   }, [enabled])
 }
 
@@ -49,11 +72,16 @@ export function moveFocus(root: HTMLElement | null, dir: 1 | -1) {
   const items = [...root.querySelectorAll<HTMLElement>('[data-nav]:not([disabled])')]
   if (!items.length) return false
   const i = items.indexOf(document.activeElement as HTMLElement)
-  const next = items[Math.max(0, Math.min(items.length - 1, i === -1 ? 0 : i + dir))]
-  next.focus({ preventScroll: false })
+  const n = Math.max(0, Math.min(items.length - 1, i === -1 ? 0 : i + dir))
+  if (n === i) return false
+  const next = items[n]
+  next.focus({ preventScroll: true })
+  reveal(next, { block: 'nearest' })
   return true
 }
 
 export function focusFirst(root: HTMLElement | null) {
-  root?.querySelector<HTMLElement>('[data-autofocus], [data-nav]:not([disabled])')?.focus()
+  const el = root?.querySelector<HTMLElement>('[data-autofocus], [data-nav]:not([disabled])')
+  el?.focus({ preventScroll: true })
+  reveal(el, { block: 'nearest' })
 }

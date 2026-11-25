@@ -1,0 +1,14 @@
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=regular-file
+Path=/var/lib/musicos/updates
+MatchPattern=musicos_@v.usr-verity.@u.raw.zst
+
+[Target]
+Type=partition
+Path=auto
+MatchPattern=musicos_@v_verity
+MatchPartitionType=usr-verity
+ReadOnly=1

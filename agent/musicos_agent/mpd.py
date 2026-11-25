@@ -40,6 +40,36 @@ def parse_format(fmt):
             "float": parts[1] == "f"}
 
 
+def group_search(q, songs, albums):
+    """Turn matching songs + the album index into artists / albums / tracks results."""
+    ql = q.casefold()
+    by_key = {(a["artist"].casefold(), a["album"].casefold()): a for a in albums}
+    artists, seen_art = [], set()
+    for a in albums:
+        if ql in a["artist"].casefold() and a["artist"] not in seen_art:
+            seen_art.add(a["artist"])
+            artists.append({"artist": a["artist"], "file": a["file"]})
+    album_hits = [a for a in albums if ql in a["album"].casefold()]
+    seen_alb = {(a["artist"].casefold(), a["album"].casefold()) for a in album_hits}
+    tracks = []
+    for s in songs:
+        artist = s.get("AlbumArtist") or s.get("Artist") or ""
+        key = (artist.casefold(), s.get("Album", "").casefold())
+        title = s.get("Title") or s["file"].rsplit("/", 1)[-1]
+        if ql in title.casefold() and len(tracks) < 30:
+            tracks.append({"file": s["file"], "title": title, "artist": artist, "album": s.get("Album", ""),
+                           "duration": float(s.get("duration") or 0)})
+        if key not in seen_alb and key in by_key and (ql in artist.casefold() or ql in s.get("Album", "").casefold()):
+            seen_alb.add(key)
+            album_hits.append(by_key[key])
+    for a in albums:  # every album by a matching artist
+        k = (a["artist"].casefold(), a["album"].casefold())
+        if a["artist"] in seen_art and k not in seen_alb:
+            seen_alb.add(k)
+            album_hits.append(a)
+    return {"artists": artists[:20], "albums": album_hits[:40], "tracks": tracks}
+
+
 def _filter(**tags):
     """MPD 0.21+ filter expression, e.g. ((AlbumArtist == "X") AND (Album == "Y"))."""
     parts = ["(%s == %s)" % (k, quote(v)) for k, v in tags.items()]
@@ -188,6 +218,9 @@ class MPDClient:
             # what the output is actually being fed right now, e.g. "96000:24:2"
             "audio": parse_format(st.get("audio", "")),
             "bitrate": int(st.get("bitrate", 0) or 0),
+            "pos": int(st["song"]) if "song" in st else -1,
+            "queueLength": int(st.get("playlistlength", 0)),
+            "random": st.get("random") == "1",
             "song": None if not song else {
                 "file": song["file"], "title": song.get("Title", ""), "artist": song.get("Artist", ""),
                 "album": song.get("Album", ""), "format": parse_format(song.get("Format", "")),
@@ -198,6 +231,51 @@ class MPDClient:
     def play_album(self, artist, album, pos=0):
         self._run("clear", "findadd " + quote(_filter(AlbumArtist=artist, Album=album)), "play %d" % int(pos))
 
+    # ---- queue ----
+    def queue(self):
+        st = dict(self._cmd("status"))
+        cur = int(st["song"]) if "song" in st else -1
+        out = []
+        for s in self._songs(self._cmd("playlistinfo")):
+            out.append({"pos": int(s.get("Pos", len(out))), "file": s["file"], "title": s.get("Title") or s["file"].rsplit("/", 1)[-1],
+                        "artist": s.get("Artist", ""), "album": s.get("Album", ""),
+                        "duration": float(s.get("duration") or 0), "current": int(s.get("Pos", -2)) == cur})
+        return out
+
+    def play_pos(self, pos):
+        self._cmd("play %d" % int(pos))
+
+    def enqueue_album(self, artist, album, mode="end"):
+        """mode: 'next' (right after the current song) or 'end'."""
+        flt = quote(_filter(AlbumArtist=artist, Album=album))
+        st = dict(self._cmd("status"))
+        if mode == "next" and "song" in st:
+            self._cmd("findadd %s position +0" % flt)
+        else:
+            self._cmd("findadd " + flt)
+            if st.get("state") != "play" and "song" not in st:
+                self._cmd("play")
+
+    def shuffle_play(self, artist=None, album=None):
+        if artist and album:
+            add = "findadd " + quote(_filter(AlbumArtist=artist, Album=album))
+        elif artist:
+            add = "findadd " + quote(_filter(AlbumArtist=artist))
+        else:
+            add = 'add "/"'
+        self._run("clear", add, "shuffle", "play 0")
+
+    def clear_queue(self):
+        self._cmd("clear")
+
+    # ---- search ----
+    def search(self, q, limit=200):
+        q = (q or "").strip()
+        if len(q) < 2:
+            return {"artists": [], "albums": [], "tracks": []}
+        songs = self._songs(self._cmd("search %s window 0:%d" % (quote("(any contains %s)" % quote(q)), limit)))
+        return group_search(q, songs, self.all_albums())
+
     def control(self, action):
         commands = {"play": "play", "pause": "pause 1", "toggle": "pause", "next": "next",
                     "previous": "previous", "stop": "stop"}
@@ -207,6 +285,9 @@ class MPDClient:
             self._cmd("play")
         else:
             self._cmd(commands[action])
+
+    def seek(self, seconds):
+        self._cmd("seekcur %.2f" % max(0.0, float(seconds)))
 
     def set_volume(self, volume):
         self._cmd("setvol %d" % max(0, min(100, int(volume))))

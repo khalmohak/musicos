@@ -13,7 +13,7 @@ OUT=out/musicos.img.gz
 
 echo ">> compressing on $BUILD_HOST and downloading to $OUT"
 ssh -o BatchMode=yes -J "$PVE_HOST" "$BUILD_HOST" \
-    'set -e; f=musicos/out/musicos.raw; [ -f "$f" ] || { echo "no build yet: run make test or make image" >&2; exit 1; }
+    'set -e; f=musicos/out/musicos_$(cat musicos/image/mkosi.version).raw; [ -f "$f" ] || { echo "no build yet: run make test or make image" >&2; exit 1; }
      date -r "$f" "+built %Y-%m-%d %H:%M" >&2
      (command -v pigz >/dev/null && pigz -c -3 "$f") || gzip -c -3 "$f"' > "$OUT.part"
 mv "$OUT.part" "$OUT"

@@ -1,0 +1,8 @@
+// The musicos UI may restart the receivers (to hand the speakers back to local playback)
+// and turn them on or off from Settings.
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "music" || action.id !== "org.freedesktop.systemd1.manage-units") return polkit.Result.NOT_HANDLED;
+    var unit = action.lookup("unit");
+    if (unit === "shairport-sync.service" || unit === "musicos-spotify.service") return polkit.Result.YES;
+    return polkit.Result.NOT_HANDLED;
+});

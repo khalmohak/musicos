@@ -25,7 +25,7 @@ const ACTION_ICON: Record<string, { icon: typeof Space; label: string }> = {
  * `name` capitalises words; `full` (passwords) has shift and symbol layers and never alters input.
  */
 export function OnScreenKeyboard({
-  value, onChange, onDone, layout = 'name', maxLength = 64, doneLabel,
+  value, onChange, onDone, layout = 'name', maxLength = 64, doneLabel, onEdge, active = true, showFocus = true,
 }: {
   value: string
   onChange: (v: string) => void
@@ -33,6 +33,11 @@ export function OnScreenKeyboard({
   layout?: Layout
   maxLength?: number
   doneLabel?: string
+  /** called when the user pushes past an edge; return true if focus moved elsewhere */
+  onEdge?: (dir: 'up' | 'down' | 'left' | 'right') => boolean
+  /** false while another part of the screen has focus */
+  active?: boolean
+  showFocus?: boolean
 }) {
   const [layer, setLayer] = useState<Layer>('lower')
   const [row, setRow] = useState(layout === 'full' ? 1 : 0)
@@ -93,17 +98,18 @@ export function OnScreenKeyboard({
     else if (k === 'left' && col > 0) move(row, col - 1)
     else if (k === 'right' && col < grid[row].length - 1) move(row, col + 1)
     else if (k === 'ok') press(grid[row][Math.min(col, grid[row].length - 1)])
-    else if (k === 'up' || k === 'down' || k === 'left' || k === 'right') sfx.edge()
-    else return false
+    else if (k === 'up' || k === 'down' || k === 'left' || k === 'right') {
+      if (!onEdge?.(k)) sfx.edge()
+    } else return false
     return true
-  })
+  }, active)
 
   const cell = (on: boolean, extra: string, content: ReactNode, value: string, id: string) => (
     <div
       key={id}
       onMouseDown={() => press(value)}
       className={`flex h-[3rem] items-center justify-center gap-2 rounded-[0.8rem] text-[1.1rem] font-medium transition-[transform,background-color,color] duration-150 ${extra} ${
-        on ? 'scale-110 bg-white text-[rgb(12_12_14)]' : 'bg-white/[0.07] text-white/75'
+        on && showFocus ? 'scale-110 bg-white text-[rgb(12_12_14)]' : 'bg-white/[0.07] text-white/75'
       }`}
     >
       {content}

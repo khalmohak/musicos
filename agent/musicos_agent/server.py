@@ -4,10 +4,14 @@ import io
 import json
 import mimetypes
 import os
+import re
+import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import config, system
+import time as _time
+
+from . import config, device, receivers, system, updates
 from .mpd import MPDError
 
 try:
@@ -29,6 +33,64 @@ def _sniff(data):
     return "application/octet-stream"
 
 
+class OnlineArt:
+    """Front covers from MusicBrainz + Cover Art Archive for albums with no local art.
+    One request per second (MusicBrainz rule), misses remembered for a week."""
+
+    UA = "musicos/0.2"
+
+    def __init__(self, cache_dir):
+        import threading
+        self.lock = threading.Lock()
+        self.miss_file = os.path.join(cache_dir, "online-misses.json")
+        try:
+            with open(self.miss_file) as fh:
+                self.misses = json.load(fh)
+        except (OSError, ValueError):
+            self.misses = {}
+        self.last = 0.0
+
+    def _get(self, url, binary=False):
+        import time
+        import urllib.request
+        with self.lock:
+            wait = 1.1 - (time.time() - self.last)
+            if wait > 0:
+                time.sleep(wait)
+            self.last = time.time()
+        req = urllib.request.Request(url, headers={"User-Agent": self.UA, "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = r.read()
+        return data if binary else json.loads(data)
+
+    def fetch(self, artist, album):
+        import time
+        import urllib.parse
+        key = "%s\x00%s" % (artist.casefold(), album.casefold())
+        if time.time() - self.misses.get(key, 0) < 7 * 86400 or not artist or not album:
+            return None
+        clean = lambda s: re.sub(r'[\\"+\-!(){}\[\]^~*?:/]|&&|\|\|', " ", re.sub(r"\(.*?\)|\[.*?\]", "", s)).strip()
+        q = 'release:"%s" AND artist:"%s"' % (clean(album), clean(artist))
+        try:
+            res = self._get("https://musicbrainz.org/ws/2/release/?fmt=json&limit=5&query=" + urllib.parse.quote(q))
+            for rel in res.get("releases", []):
+                if rel.get("score", 0) < 80:
+                    continue
+                try:
+                    return self._get("https://coverartarchive.org/release/%s/front-500" % rel["id"], binary=True)
+                except Exception:
+                    continue
+        except Exception as e:  # offline, timeout, rate-limited: try again another day
+            print("online art: %s - %s: %s" % (artist, album, e), flush=True)
+        self.misses[key] = time.time()
+        try:
+            with open(self.miss_file, "w") as fh:
+                json.dump(self.misses, fh)
+        except OSError:
+            pass
+        return None
+
+
 class Covers:
     """Finds album art (folder image first, then embedded via MPD) and caches resized copies."""
 
@@ -36,6 +98,35 @@ class Covers:
         self.client, self.root = client, os.path.realpath(music_root)
         self.cache = os.path.join(config.state_dir(), "covers")
         os.makedirs(self.cache, exist_ok=True)
+        self.online = OnlineArt(self.cache)
+        self._dirs = (None, {})
+
+    def _album_for(self, uri):
+        """(artist, album) of the album folder holding uri, from the library index."""
+        try:
+            albums = self.client.all_albums()
+        except Exception:
+            return None
+        if self._dirs[0] is not albums:
+            self._dirs = (albums, {os.path.dirname(a["file"]): (a["artist"], a["album"]) for a in albums})
+        return self._dirs[1].get(os.path.dirname(uri))
+
+    def _online(self, uri):
+        if not config.load().get("onlineArt", True):
+            return None
+        meta = self._album_for(uri)
+        if not meta:
+            return None
+        # one cached original per album folder, shared by every track and size
+        key = os.path.join(self.cache, "online-" + hashlib.sha1(os.path.dirname(uri).encode()).hexdigest())
+        if os.path.exists(key):
+            with open(key, "rb") as fh:
+                return fh.read()
+        data = self.online.fetch(*meta)
+        if data:
+            with open(key, "wb") as fh:
+                fh.write(data)
+        return data
 
     def _folder_image(self, uri):
         d = os.path.realpath(os.path.join(self.root, os.path.dirname(uri)))
@@ -53,6 +144,34 @@ class Covers:
                         return fh.read()
         return None
 
+    def get_file(self, path, size, keep_alpha=False):
+        """Resize an arbitrary image file (artist photos, backdrops, logos) with the same cache."""
+        size = max(0, min(int(size or 0), 2400))
+        key = hashlib.sha1(("file|%s|%d|%d" % (path, size, os.path.getmtime(path))).encode()).hexdigest()
+        cached = os.path.join(self.cache, key)
+        if os.path.exists(cached):
+            with open(cached, "rb") as fh:
+                return fh.read()
+        with open(path, "rb") as fh:
+            data = fh.read()
+        if size and Image is not None:
+            try:
+                im = Image.open(io.BytesIO(data))
+                im = im.convert("RGBA" if keep_alpha else "RGB")
+                im.thumbnail((size, size), Image.LANCZOS)
+                buf = io.BytesIO()
+                if keep_alpha:
+                    im.save(buf, "PNG", optimize=True)
+                else:
+                    im.save(buf, "JPEG", quality=86, optimize=True)
+                data = buf.getvalue()
+            except Exception:
+                pass
+        with open(cached + ".tmp", "wb") as fh:
+            fh.write(data)
+        os.replace(cached + ".tmp", cached)
+        return data
+
     def get(self, uri, size, blur=False):
         size = max(0, min(int(size or 0), 1600))
         if blur:
@@ -62,7 +181,7 @@ class Covers:
         if os.path.exists(path):
             with open(path, "rb") as fh:
                 return fh.read()
-        data = self._folder_image(uri) or self.client.albumart(uri)
+        data = self._folder_image(uri) or self.client.albumart(uri) or self._online(uri)
         if not data:
             return None
         if size and Image is not None:
@@ -85,6 +204,113 @@ class Covers:
             fh.write(data)
         os.replace(tmp, path)
         return data
+
+
+LRC_TIME = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
+LRC_OFFSET = re.compile(r"\[offset:\s*([+-]?\d+)\]", re.I)
+PHOTO_NAMES = ("folder", "artist", "photo", "poster")
+BACKDROP_NAMES = ("backdrop", "backdrop1", "fanart", "background")
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]", "", s.casefold())
+
+
+def lyrics_for(root, uri):
+    """Synced (.lrc) or plain (.txt) lyrics stored next to the audio file."""
+    base = os.path.realpath(os.path.join(root, os.path.splitext(uri)[0]))
+    if not base.startswith(root + os.sep):
+        return None
+    for ext, synced in ((".lrc", True), (".txt", False)):
+        try:
+            with open(base + ext, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        if not synced:
+            lines = [l.strip() for l in text.splitlines()]
+            return {"synced": False, "lines": [{"t": None, "text": l} for l in lines]}
+        m = LRC_OFFSET.search(text)
+        offset = int(m.group(1)) / 1000.0 if m else 0.0
+        out = []
+        for line in text.splitlines():
+            stamps = LRC_TIME.findall(line)
+            if not stamps:
+                continue
+            words = LRC_TIME.sub("", line).strip()
+            for mm, ss in stamps:
+                out.append({"t": max(0.0, int(mm) * 60 + float(ss) - offset), "text": words})
+        out.sort(key=lambda l: l["t"])
+        if out:
+            return {"synced": True, "lines": out}
+    return None
+
+
+def artist_dir(root, uri, artist):
+    """The artist folder above an album (Artist/Album/track), if it really is that artist's."""
+    d = os.path.realpath(os.path.join(root, os.path.dirname(os.path.dirname(uri))))
+    if not d.startswith(root + os.sep) or not os.path.isdir(d):
+        return None
+    a, n = _norm(artist), _norm(os.path.basename(d))
+    if not a or not n or (a not in n and n not in a):
+        return None
+    return d
+
+
+def artist_image(root, uri, artist, kind):
+    d = artist_dir(root, uri, artist)
+    if not d:
+        return None
+    try:
+        names = {n.lower(): n for n in os.listdir(d) if not n.startswith(".")}
+    except OSError:
+        return None
+    if kind == "logo":
+        cands = ["logo.png", "clearlogo.png"]
+    else:
+        cands = [b + e for b in (PHOTO_NAMES if kind == "photo" else BACKDROP_NAMES) for e in (".jpg", ".jpeg", ".png", ".webp")]
+    for c in cands:
+        if c in names:
+            return os.path.join(d, names[c])
+    return None
+
+
+def cec_wake():
+    """Turn the TV on and switch to us (HDMI-CEC), fire and forget."""
+    helper = "/usr/local/lib/musicos/cec"
+    if os.path.exists(helper):
+        try:
+            subprocess.Popen([helper, "wake"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+
+
+ACTIVITY = {"at": _time.time(), "slept": False}
+
+
+def auto_sleep(client):
+    """After `autoSleep` idle minutes with nothing playing: TV off (CEC), optionally suspend."""
+    import threading
+
+    def loop():
+        while True:
+            _time.sleep(30)
+            try:
+                cfg = config.load()
+                mins = int(cfg.get("autoSleep") or 0)
+                if not mins or ACTIVITY["slept"]:
+                    continue
+                if client.status().get("state") == "play":
+                    ACTIVITY["at"] = _time.time()
+                    continue
+                if _time.time() - ACTIVITY["at"] > mins * 60:
+                    ACTIVITY["slept"] = True
+                    print("auto-sleep after %d idle minutes" % mins, flush=True)
+                    device.power("sleep" if cfg.get("sleepSystem") else "tv-off")
+            except Exception as e:
+                print("auto-sleep: %s" % e, flush=True)
+
+    threading.Thread(target=loop, daemon=True).start()
 
 
 def make_handler(client, ui_dir, covers, port):
@@ -130,7 +356,13 @@ def make_handler(client, ui_dir, covers, port):
             p = url.path
             try:
                 if p == "/api/status":
-                    return self._send(200, client.status())
+                    st = client.status()
+                    st["receiver"] = receivers.status()
+                    return self._send(200, st)
+                if p == "/api/receiver/cover":
+                    if not receivers.COVER["data"]:
+                        return self._send(404, {})
+                    return self._send(200, receivers.COVER["data"], receivers.COVER["type"])
                 if p == "/api/info":
                     return self._send(200, dict(system.device_info(port), backend=type(client).__name__))
                 if p == "/api/config":
@@ -150,10 +382,63 @@ def make_handler(client, ui_dir, covers, port):
                     if not data:
                         return self._send(404, {}, cache="max-age=300")
                     return self._send(200, data, _sniff(data), "public, max-age=604800")
+                if p == "/api/queue":
+                    return self._send(200, client.queue())
+                if p == "/api/search":
+                    return self._send(200, client.search(q.get("q", "")))
+                if p == "/api/lyrics":
+                    return self._send(200, lyrics_for(covers.root, q.get("file", "")) or {"synced": False, "lines": []})
+                if p == "/api/artist-index":
+                    groups = {}
+                    for a in client.all_albums():
+                        g = groups.setdefault(a["artist"], {"artist": a["artist"], "albums": 0, "file": a["file"]})
+                        g["albums"] += 1
+                    out = []
+                    for g in sorted(groups.values(), key=lambda g: g["artist"].casefold()):
+                        g["photo"] = bool(artist_image(covers.root, g["file"], g["artist"], "photo"))
+                        out.append(g)
+                    return self._send(200, out)
+                if p == "/api/artist":
+                    name = q.get("name", "")
+                    albums = [a for a in client.all_albums() if a["artist"] == name]
+                    f = albums[0]["file"] if albums else ""
+                    has = {k: bool(f and artist_image(covers.root, f, name, k)) for k in ("photo", "backdrop", "logo")}
+                    return self._send(200, dict(artist=name, albums=albums, file=f, **has))
+                if p == "/api/artist-art":
+                    path = artist_image(covers.root, q.get("file", ""), q.get("artist", ""), q.get("kind", "photo"))
+                    if not path:
+                        return self._send(404, {}, cache="max-age=300")
+                    data = covers.get_file(path, q.get("size", 0), keep_alpha=q.get("kind") == "logo")
+                    return self._send(200, data, _sniff(data), "public, max-age=604800")
                 if p == "/api/audio/outputs":
                     return self._send(200, system.audio_outputs())
                 if p == "/api/sources":
                     return self._send(200, system.music_sources(covers.root))
+                if p == "/api/report":
+                    path = os.path.join(config.state_dir(), "report.txt")
+                    try:
+                        st = os.stat(path)
+                        with open(path, errors="replace") as fh:
+                            return self._send(200, {"text": fh.read(), "at": st.st_mtime})
+                    except OSError:
+                        return self._send(200, {"text": "", "at": 0})
+                if p == "/api/receivers":
+                    cfg = config.load()
+                    return self._send(200, {"name": cfg.get("receiverName", "musicos"),
+                                            "airplay": {"on": cfg.get("airplay", True), "installed": os.path.exists("/usr/bin/shairport-sync")},
+                                            "spotify": {"on": cfg.get("spotify", True), "installed": os.path.exists("/usr/bin/librespot")}})
+                if p == "/api/update":
+                    return self._send(200, updates.status())
+                if p == "/api/timezones":
+                    return self._send(200, device.timezones())
+                if p == "/api/display":
+                    return self._send(200, device.display_modes())
+                if p == "/api/bluetooth":
+                    return self._send(200, device.bt_devices())
+                if p == "/api/wifi/saved":
+                    return self._send(200, device.wifi_saved())
+                if p == "/api/connections":
+                    return self._send(200, device.active_connections())
                 if p == "/api/network":
                     return self._send(200, system.network_status())
                 if p == "/api/network/wifi":
@@ -170,12 +455,33 @@ def make_handler(client, ui_dir, covers, port):
             p = urlparse(self.path).path
             try:
                 b = self._body()
+                ACTIVITY["at"], ACTIVITY["slept"] = _time.time(), False
                 safe = {k: ("***" if k == "password" else v) for k, v in b.items()} if isinstance(b, dict) else b
                 print("POST %s %s" % (p, json.dumps(safe)), flush=True)
+                if p == "/api/receiver":
+                    if self.client_address[0] not in ("127.0.0.1", "::1"):
+                        return self._send(403, {"error": "local only"})
+                    receivers.event(b)
+                    return self._send(200, {"ok": True})
                 if p == "/api/play":
+                    receivers.release_for_local_playback()
                     client.play_album(b["artist"], b["album"], b.get("pos", 0))
+                    cec_wake()
+                elif p == "/api/queue/play":
+                    receivers.release_for_local_playback()
+                    client.play_pos(b["pos"])
+                elif p == "/api/queue/add":
+                    client.enqueue_album(b["artist"], b["album"], b.get("mode", "end"))
+                elif p == "/api/queue/clear":
+                    client.clear_queue()
+                elif p == "/api/shuffle":
+                    receivers.release_for_local_playback()
+                    client.shuffle_play(b.get("artist"), b.get("album"))
+                    cec_wake()
                 elif p == "/api/control":
                     client.control(b["action"])
+                elif p == "/api/seek":
+                    client.seek(b["to"])
                 elif p == "/api/volume":
                     client.set_volume(b["volume"])
                 elif p == "/api/update":
@@ -193,6 +499,60 @@ def make_handler(client, ui_dir, covers, port):
                     return self._send(200, cfg)
                 elif p == "/api/network/wifi":
                     return self._send(200, system.wifi_connect(b["ssid"], b.get("password", "")))
+                elif p == "/api/receivers":
+                    changes = {k: b[k] for k in ("airplay", "spotify") if k in b}
+                    if "name" in b:
+                        changes["receiverName"] = str(b["name"])[:40]
+                    cfg = config.update(changes)
+                    config.request_apply()
+                    return self._send(200, {"ok": True, "name": cfg.get("receiverName")})
+                elif p == "/api/update/check":
+                    url = b.get("url") or config.load().get("updateUrl", "")
+                    if b.get("url"):
+                        config.update({"updateUrl": b["url"]})
+                    return self._send(200, updates.download(url))
+                elif p == "/api/update/usb":
+                    return self._send(200, updates.from_usb(b["path"]))
+                elif p == "/api/update/install":
+                    return self._send(200, updates.install())
+                elif p == "/api/update/discard":
+                    updates.discard()
+                    return self._send(200, {"ok": True})
+                elif p == "/api/activity":
+                    ACTIVITY["at"], ACTIVITY["slept"] = _time.time(), False
+                    return self._send(200, {"ok": True})
+                elif p == "/api/power":
+                    device.power(b["action"])
+                    return self._send(200, {"ok": True})
+                elif p == "/api/timezone":
+                    device.set_timezone(b["zone"])
+                    return self._send(200, {"ok": True})
+                elif p == "/api/display":
+                    device.set_display_mode(b["output"], b["mode"])
+                    return self._send(200, config.update({"displayMode": b["mode"]}))
+                elif p == "/api/bluetooth/scan":
+                    device.bt_scan()
+                    return self._send(200, {"ok": True})
+                elif p == "/api/bluetooth/pair":
+                    device.bt_pair(b["mac"])
+                    return self._send(200, {"ok": True})
+                elif p == "/api/bluetooth/forget":
+                    device.bt_forget(b["mac"])
+                    return self._send(200, {"ok": True})
+                elif p == "/api/wifi/forget":
+                    device.wifi_forget(b["name"])
+                    return self._send(200, {"ok": True})
+                elif p == "/api/wifi/hidden":
+                    device.wifi_hidden(b["ssid"], b.get("password", ""))
+                    return self._send(200, {"ok": True})
+                elif p == "/api/ipv4":
+                    device.set_ipv4(b["connection"], b["method"], b.get("address", ""), b.get("prefix", 24),
+                                    b.get("gateway", ""), b.get("dns", ""))
+                    return self._send(200, {"ok": True})
+                elif p == "/api/report":
+                    with open(os.path.join(config.state_dir(), "report-request"), "w") as fh:
+                        fh.write(str(os.getpid()))
+                    return self._send(200, {"ok": True})
                 elif p == "/api/audio/test":
                     system.play_test_sound(b.get("id", "default"))
                     return self._send(200, {"ok": True})
@@ -214,8 +574,42 @@ def make_handler(client, ui_dir, covers, port):
     return Handler
 
 
+def watch_sources(client, root):
+    """Rescan the library when a drive or share appears under the music root (MPD's inotify
+    doesn't see automounts). Touching each entry also triggers its automount."""
+    import threading
+    import time
+
+    def loop():
+        seen = None
+        while True:
+            try:
+                now = set()
+                for name in os.listdir(root):
+                    p = os.path.join(root, name)
+                    if os.path.isdir(p) and not name.startswith("."):
+                        try:
+                            if os.listdir(p):
+                                now.add(name)
+                        except OSError:
+                            pass
+                if seen is not None and now - seen:
+                    print("new music source(s): %s, rescanning" % ", ".join(sorted(now - seen)), flush=True)
+                    client.update()
+                seen = now
+            except Exception as e:  # never let the watcher die
+                print("source watcher: %s" % e, flush=True)
+            time.sleep(10)
+
+    threading.Thread(target=loop, daemon=True).start()
+
+
 def serve(client, ui_dir, host, port, music_root):
     covers = Covers(client, music_root)
+    if type(client).__name__ == "MPDClient":
+        watch_sources(client, os.path.realpath(music_root))
+    auto_sleep(client)
+    receivers.start()
     httpd = ThreadingHTTPServer((host, port), make_handler(client, ui_dir, covers, port))
     print("musicos-agent on http://%s:%d (ui: %s, music: %s, backend: %s)"
           % (host, port, ui_dir, music_root, type(client).__name__), flush=True)

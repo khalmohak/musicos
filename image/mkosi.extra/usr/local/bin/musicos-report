@@ -1,0 +1,42 @@
+#!/bin/sh
+# One-shot hardware/boot report for debugging on a real machine:
+#   musicos-report            (on the box, e.g. Ctrl+Alt+F2, log in, run it)
+#   ssh music@musicos.local musicos-report > report.txt
+section() { printf '\n===== %s =====\n' "$1"; }
+section "system";   uname -r; cat /etc/os-release 2>/dev/null | grep PRETTY; uptime
+section "gpus";     lspci -nnk 2>/dev/null | grep -A3 -iE 'vga|3d|display' || echo "(lspci missing)"
+section "drm";      for s in /sys/class/drm/card*-*/status; do
+                        [ -e "$s" ] || continue
+                        c=$(basename "$(dirname "$s")")
+                        printf '%-28s %-12s %s\n' "$c" "$(cat "$s")" \
+                          "$(basename "$(readlink -f "/sys/class/drm/${c%%-*}/device/driver")")"
+                    done
+section "kiosk";    systemctl status musicos-kiosk --no-pager 2>&1 | head -12
+                    journalctl -b -u musicos-kiosk --no-pager 2>&1 | tail -40
+section "agent/mpd"; systemctl is-active musicos-agent mpd
+                    journalctl -b -u musicos-agent -u mpd --no-pager -p warning 2>&1 | tail -15
+section "drives";   lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS 2>&1
+                    journalctl -b --no-pager 2>&1 | grep -iE 'srv-music|systemd-mount' | tail -20
+section "gpu kernel messages"; journalctl -kb --no-pager 2>&1 | grep -iE 'nouveau|amdgpu|i915|drm' | tail -30
+section "audio";    aplay -l 2>&1 | grep -E '^card'
+                    for c in /proc/asound/card[0-9]*; do
+                        n=${c##*card}
+                        amixer -c "$n" contents 2>/dev/null | grep -A2 "Jack'" | grep -E "name=|values=(on|off)" | paste - - | sed "s/^/card$n /"
+                        grep -H -E "monitor_present|monitor_name" "$c"/eld#* 2>/dev/null
+                    done
+                    echo "--- /etc/asound.conf"; cat /etc/asound.conf 2>&1
+                    echo "--- mpd output"; cat /var/lib/musicos/mpd-output.conf 2>&1
+                    echo "--- routing (python3 -m musicos_agent.audio)"
+                    PYTHONPATH=/usr/lib/musicos/agent python3 -m musicos_agent.audio 2>&1 | tail -8
+                    journalctl -b -u musicos-apply --no-pager 2>&1 | tail -8
+section "network";  ip -br addr 2>&1
+                    nmcli -t general status 2>&1; nmcli device 2>&1
+                    rfkill list 2>&1
+                    lspci -nnk 2>/dev/null | grep -A3 -iE 'network|wireless|ethernet'
+                    lsusb 2>/dev/null
+                    journalctl -kb --no-pager 2>&1 | grep -iE 'firmware|iwlwifi|mt79|rtw|ath1|brcm|wlan' | tail -20
+section "usb drives"; journalctl -b --no-pager -u 'musicos-automount@*' 2>&1 | tail -20
+                    ls -la /srv/music 2>&1; findmnt -R /srv/music 2>&1
+section "input devices"; grep -E "^N:" /proc/bus/input/devices 2>&1
+                    journalctl -b -u musicos-input --no-pager 2>&1 | tail -10
+section "failed units"; systemctl --failed --no-pager 2>&1

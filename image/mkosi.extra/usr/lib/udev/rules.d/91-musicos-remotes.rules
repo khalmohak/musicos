@@ -1,0 +1,6 @@
+# HDMI-CEC adapters (GPU or Pulse-Eight USB): register as a playback device when they appear.
+SUBSYSTEM=="cec", ACTION=="add", RUN+="/usr/local/lib/musicos/cec setup $devnode"
+# IR receivers: accept every protocol so most remotes produce key presses.
+SUBSYSTEM=="rc", ACTION=="add", RUN+="/usr/bin/ir-keytable -s $name -p all"
+# /dev/cec* group video (the agent runs as music, a video member) for "turn TV on" on play.
+SUBSYSTEM=="cec", GROUP="video", MODE="0660"

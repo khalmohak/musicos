@@ -8,7 +8,9 @@ import re
 import struct
 import time
 
-from .mpd import codec_of
+import random
+
+from .mpd import codec_of, group_search
 
 AUDIO = (".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".alac", ".aiff")
 YEAR_RE = re.compile(r"^(\d{4})\s*-\s*(.+)$")
@@ -38,7 +40,7 @@ class FolderClient:
     def __init__(self, root):
         self.root = os.path.realpath(root)
         self._albums = None
-        self.queue, self.pos, self.state, self.volume = [], 0, "stop", 60
+        self._q, self.pos, self.state, self.volume = [], 0, "stop", 60
         self.started, self.offset = 0.0, 0.0
 
     # ---- library ----
@@ -117,32 +119,32 @@ class FolderClient:
     # ---- simulated playback ----
     def _elapsed(self):
         e = self.offset + (time.time() - self.started if self.state == "play" else 0)
-        if e >= self._dur() and self.queue:
-            self.pos = (self.pos + 1) % len(self.queue)
+        if e >= self._dur() and self._q:
+            self.pos = (self.pos + 1) % len(self._q)
             self.started, self.offset, e = time.time(), 0.0, 0.0
         return e
 
     def _dur(self):
-        song = self.queue[self.pos] if self.queue else None
+        song = self._q[self.pos] if self._q else None
         return (song or {}).get("duration") or 240.0
 
     def status(self):
-        song = self.queue[self.pos] if self.queue and self.state != "stop" else None
+        song = self._q[self.pos] if self._q and self.state != "stop" else None
         fmt = song.get("format") if song else None
         return {"state": self.state, "volume": self.volume, "elapsed": self._elapsed() if song else 0,
                 "duration": self._dur() if song else 0,
                 "audio": fmt if self.state == "play" else None,
-                "bitrate": 0,
+                "bitrate": 0, "pos": self.pos if song else -1, "queueLength": len(self._q), "random": False,
                 "song": None if not song else {"file": song["file"], "title": song["title"],
                                                "artist": song["_artist"], "album": song["_album"],
                                                "format": fmt, "codec": song.get("codec", "")}}
 
     def play_album(self, artist, album, pos=0):
-        self.queue, self.pos = self.tracks(artist, album), int(pos)
+        self._q, self.pos = self.tracks(artist, album), int(pos)
         self.state, self.started, self.offset = "play", time.time(), 0.0
 
     def control(self, action):
-        if not self.queue:
+        if not self._q:
             return
         if action in ("toggle", "pause", "play"):
             if self.state == "play" and action != "play":
@@ -150,10 +152,64 @@ class FolderClient:
             elif action != "pause":
                 self.state, self.started = "play", time.time()
         elif action in ("next", "previous"):
-            self.pos = (self.pos + (1 if action == "next" else -1)) % len(self.queue)
+            self.pos = (self.pos + (1 if action == "next" else -1)) % len(self._q)
             self.started, self.offset, self.state = time.time(), 0.0, "play"
         elif action == "stop":
             self.state, self.offset = "stop", 0.0
 
+    def seek(self, seconds):
+        self.offset, self.started = max(0.0, float(seconds)), time.time()
+
     def set_volume(self, volume):
         self.volume = max(0, min(100, int(volume)))
+
+    # ---- queue / search (simulated) ----
+    def queue(self):
+        return [{"pos": i, "file": t["file"], "title": t["title"], "artist": t["_artist"], "album": t["_album"],
+                 "duration": t["duration"], "current": i == self.pos and self.state != "stop"}
+                for i, t in enumerate(self._q)]
+
+    def play_pos(self, pos):
+        if 0 <= int(pos) < len(self._q):
+            self.pos, self.state, self.started, self.offset = int(pos), "play", time.time(), 0.0
+
+    def enqueue_album(self, artist, album, mode="end"):
+        tracks = self.tracks(artist, album)
+        if mode == "next" and self._q:
+            self._q[self.pos + 1:self.pos + 1] = tracks
+        else:
+            was_empty = not self._q
+            self._q += tracks
+            if was_empty:
+                self.play_pos(0)
+
+    def shuffle_play(self, artist=None, album=None):
+        if artist and album:
+            tracks = self.tracks(artist, album)
+        else:
+            tracks = [t for a in self._all() if not artist or a["artist"] == artist
+                      for t in self.tracks(a["artist"], a["album"])]
+        random.shuffle(tracks)
+        self._q = tracks[:500]
+        self.play_pos(0)
+
+    def clear_queue(self):
+        self._q, self.pos, self.state = [], 0, "stop"
+
+    def search(self, q, limit=200):
+        q = (q or "").strip()
+        if len(q) < 2:
+            return {"artists": [], "albums": [], "tracks": []}
+        ql, songs = q.casefold(), []
+        for a in self._all():
+            hit_album = ql in a["artist"].casefold() or ql in a["album"].casefold()
+            for f in a["_files"]:
+                base = os.path.splitext(f)[0]
+                m = TRACK_RE.match(base)
+                title = m.group(2) if m else base
+                if hit_album or ql in title.casefold():
+                    songs.append({"file": "%s/%s" % (a["_dir"], f), "Title": title, "Artist": a["artist"],
+                                  "Album": a["album"]})
+                if len(songs) >= limit:
+                    break
+        return group_search(q, songs, self.all_albums())

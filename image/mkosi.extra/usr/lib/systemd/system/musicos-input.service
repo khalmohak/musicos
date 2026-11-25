@@ -1,0 +1,14 @@
+# Game controllers, IR and HDMI-CEC remotes -> keys for the UI (see agent/musicos_agent/inputd.py)
+[Unit]
+Description=musicos controller and remote input
+After=systemd-udevd.service
+
+[Service]
+Environment=PYTHONPATH=/usr/lib/musicos/agent
+ExecStartPre=-/usr/sbin/modprobe uinput
+ExecStart=/usr/bin/python3 -m musicos_agent.inputd
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

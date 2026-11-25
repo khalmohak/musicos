@@ -1,27 +1,60 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { type Album, type AudioOutput, type Config, type Status, albumKey, api } from './lib/api'
-import { configureSounds, primeAudio } from './lib/sounds'
+import { type Album, type ArtistEntry, type AudioOutput, type Config, type Status, api } from './lib/api'
+import { useRemote } from './lib/keys'
+import { configureSounds, primeAudio, sfx } from './lib/sounds'
+import { PowerMenu } from './components/PowerMenu'
+import { VolumeOsd } from './components/VolumeOsd'
 import { AlbumView } from './screens/AlbumView'
+import { ArtistView } from './screens/ArtistView'
 import { Boot } from './screens/Boot'
-import { Home } from './screens/Home'
+import { Home, type HomeTab } from './screens/Home'
 import { NowPlaying } from './screens/NowPlaying'
+import { QueueView } from './screens/QueueView'
+import { Screensaver } from './screens/Screensaver'
+import { SearchView } from './screens/SearchView'
 import { Settings } from './screens/Settings'
 import { Setup } from './screens/Setup'
 
-type Screen = { kind: 'setup' } | { kind: 'home' } | { kind: 'album'; album: Album } | { kind: 'playing' } | { kind: 'settings' }
+type Screen =
+  | { kind: 'setup' }
+  | { kind: 'home' }
+  | { kind: 'album'; album: Album }
+  | { kind: 'artist'; name: string }
+  | { kind: 'playing' }
+  | { kind: 'queue' }
+  | { kind: 'search' }
+  | { kind: 'settings' }
 
+type Transport = 'playpause' | 'next' | 'prev' | 'volup' | 'voldown'
 const MIN_BOOT_MS = 1800
 
 export function App() {
   const [config, setConfig] = useState<Config | null>(null)
   const [albums, setAlbums] = useState<Album[]>([])
+  const [artists, setArtists] = useState<ArtistEntry[]>([])
   const [status, setStatus] = useState<Status | null>(null)
-  const [screen, setScreen] = useState<Screen | null>(null)
-  const [boot, setBoot] = useState<'on' | 'leaving' | 'off'>('on')
   const [outputs, setOutputs] = useState<AudioOutput[]>([])
-  const focusKey = useRef<string | null>(null)
+  const [stack, setStack] = useState<Screen[]>([])
+  const [boot, setBoot] = useState<'on' | 'leaving' | 'off'>('on')
+  const [homeTab, setHomeTab] = useState<HomeTab>('albums')
+  const [homeFocus, setHomeFocus] = useState({ albums: 0, artists: 0 })
+  const [idle, setIdle] = useState(() => new URLSearchParams(location.search).has('saver'))
+  const lastInput = useRef(Date.now())
+  const lastBeat = useRef(0)
+  const [power, setPower] = useState(() => new URLSearchParams(location.search).has('power'))
+  const screen = stack[stack.length - 1]
 
-  // boot: load everything, keep the record spinning at least MIN_BOOT_MS, then fade
+  // ---- navigation: a stack, so Back always returns to where you were ----
+  const push = useCallback((s: Screen) => setStack((st) => [...st, s]), [])
+  const pop = useCallback(() => setStack((st) => (st.length > 1 ? st.slice(0, -1) : st)), [])
+  const goHome = useCallback(() => setStack([{ kind: 'home' }]), [])
+  /** open a screen once: if it's already in the stack, go back to it instead of stacking a copy */
+  const open = useCallback((s: Screen) => setStack((st) => {
+    const i = st.findIndex((x) => x.kind === s.kind && s.kind !== 'album' && s.kind !== 'artist')
+    return i >= 0 ? st.slice(0, i + 1) : [...st, s]
+  }), [])
+
+  // ---- boot ----
   useEffect(() => {
     const started = Date.now()
     const load = async () => {
@@ -32,12 +65,18 @@ export function App() {
           setAlbums(a)
           setStatus(s)
           configureSounds({ enabled: c.uiSounds, musicPlaying: s.state === 'play' })
-          setScreen(c.setupComplete ? { kind: 'home' } : { kind: 'setup' })
-          // dev only: ?go=home|setup|playing|album:<index> jumps straight to a screen (screenshots)
-          const go = import.meta.env.DEV || new URLSearchParams(location.search).has('debug')
-            ? new URLSearchParams(location.search).get('go') : null
-          if (go === 'home' || go === 'setup' || go === 'playing' || go === 'settings') setScreen({ kind: go })
-          else if (go?.startsWith('album:') && a[Number(go.slice(6))]) setScreen({ kind: 'album', album: a[Number(go.slice(6))] })
+          const first: Screen = c.setupComplete ? { kind: 'home' } : { kind: 'setup' }
+          // dev only: ?debug&go=home|setup|playing|settings|queue|search|album:<i>|artist:<name>
+          const params = new URLSearchParams(location.search)
+          const go = import.meta.env.DEV || params.has('debug') ? params.get('go') : null
+          const extra: Screen | null =
+            go === 'playing' || go === 'settings' || go === 'queue' || go === 'search' ? { kind: go }
+              : go === 'setup' ? { kind: 'setup' }
+                : go?.startsWith('album:') && a[Number(go.slice(6))] ? { kind: 'album', album: a[Number(go.slice(6))] }
+                  : go?.startsWith('artist:') ? { kind: 'artist', name: decodeURIComponent(go.slice(7)) }
+                    : null
+          if (go === 'artists') setHomeTab('artists')
+          setStack(extra ? (extra.kind === 'setup' ? [extra] : [{ kind: 'home' }, extra]) : [first])
           break
         } catch {
           await new Promise((r) => setTimeout(r, 1500)) // agent or MPD still starting
@@ -49,12 +88,13 @@ export function App() {
     }
     load()
     api.outputs().then(setOutputs).catch(() => {})
+    api.artists().then(setArtists).catch(() => {})
     const prime = () => primeAudio()
     window.addEventListener('keydown', prime, { once: true })
     return () => window.removeEventListener('keydown', prime)
   }, [])
 
-  // playback state
+  // ---- playback state ----
   useEffect(() => {
     const t = setInterval(() => {
       api.status().then((s) => {
@@ -65,16 +105,64 @@ export function App() {
     return () => clearInterval(t)
   }, [])
 
-  // refresh the wall when the library changes (scan finished, share mounted)
+  // refresh the library when it changes (scan finished, a drive mounted)
   useEffect(() => {
     if (screen?.kind !== 'home') return
-    const t = setInterval(() => api.albums().then((a) => {
-      setAlbums((old) => (old.length === a.length ? old : a))
-    }).catch(() => {}), 20000)
+    const t = setInterval(() => {
+      api.albums().then((a) => setAlbums((old) => (old.length === a.length ? old : a))).catch(() => {})
+      api.artists().then((a) => setArtists((old) => (old.length === a.length ? old : a))).catch(() => {})
+    }, 20000)
     return () => clearInterval(t)
   }, [screen?.kind])
 
-  const transport = useCallback(async (k: 'playpause' | 'next' | 'prev' | 'volup' | 'voldown') => {
+  // ---- screensaver: any key wakes it and is swallowed, so waking never triggers an action ----
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      lastInput.current = Date.now()
+      if (Date.now() - lastBeat.current > 30000) {
+        lastBeat.current = Date.now()
+        api.activity().catch(() => {}) // keeps auto-standby from switching the TV off mid-browse
+      }
+      if (idle) {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        setIdle(false)
+      }
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [idle])
+  useEffect(() => {
+    const mins = config?.screensaver ?? 5
+    if (!mins || screen?.kind === 'setup') return
+    const t = setInterval(() => {
+      if (Date.now() - lastInput.current > mins * 60000) setIdle(true)
+    }, 5000)
+    return () => clearInterval(t)
+  }, [config?.screensaver, screen?.kind])
+
+  // ---- global buttons (controller Guide/View/X, remote Home/Setup/Search) ----
+  useRemote((k) => {
+    if (!screen || screen.kind === 'setup') return false
+    if (k === 'home') return sfx.back(), goHome(), true
+    if (k === 'settings' && screen.kind !== 'settings') return sfx.select(), open({ kind: 'settings' }), true
+    if (k === 'search' && screen.kind !== 'search') return sfx.select(), open({ kind: 'search' }), true
+    if (k === 'stop') return api.control('stop').then(setStatus).catch(() => {}), true
+    if (k === 'power') return sfx.select(), setPower(true), true
+    return false
+  })
+
+  // UI size and TV overscan (Settings > Display)
+  useEffect(() => {
+    const root = document.documentElement
+    const scale = config?.uiScale ?? 1
+    root.style.fontSize = `max(14px, ${(1.25 * scale).toFixed(3)}vw)`
+    const pad = `${config?.overscan ?? 0}vw`
+    const app = document.getElementById('root')
+    if (app) app.style.padding = config?.overscan ? `${pad} ${pad}` : ''
+  }, [config?.uiScale, config?.overscan])
+
+  const transport = useCallback(async (k: Transport) => {
     try {
       let s: Status
       if (k === 'playpause') s = await api.control('toggle')
@@ -87,61 +175,73 @@ export function App() {
     }
   }, [status?.volume])
 
+  const played = (s: Status) => {
+    setStatus(s)
+    open({ kind: 'playing' })
+  }
+  const openAlbum = (album: Album) => push({ kind: 'album', album })
+  const openArtist = (name: string) => push({ kind: 'artist', name })
+
+  const screenKey = screen ? `${screen.kind}:${screen.kind === 'album' ? screen.album.file : screen.kind === 'artist' ? screen.name : ''}` : ''
+
   return (
     <>
+      <div key={screenKey} className="mo-page">
       {config && screen?.kind === 'setup' && (
         <Setup
           config={config}
           onDone={async (c) => {
             setConfig(c)
             setAlbums(await api.albums().catch(() => albums))
-            setScreen({ kind: 'home' })
+            api.artists().then(setArtists).catch(() => {})
+            goHome()
           }}
         />
       )}
       {config && screen?.kind === 'home' && (
         <Home
           albums={albums}
+          artists={artists}
           status={status}
           name={config.name}
-          focusKey={focusKey.current}
-          onOpen={(album) => {
-            focusKey.current = albumKey(album)
-            setScreen({ kind: 'album', album })
-          }}
-          onNowPlaying={() => setScreen({ kind: 'playing' })}
-          onSettings={() => setScreen({ kind: 'settings' })}
+          tab={homeTab}
+          focus={homeFocus}
+          onTab={setHomeTab}
+          onFocus={(t, i) => setHomeFocus((f) => ({ ...f, [t]: i }))}
+          onOpenAlbum={openAlbum}
+          onOpenArtist={openArtist}
+          onNowPlaying={() => open({ kind: 'playing' })}
+          onSearch={() => open({ kind: 'search' })}
+          onSettings={() => open({ kind: 'settings' })}
+          onPower={() => setPower(true)}
           onTransport={transport}
         />
       )}
       {screen?.kind === 'album' && (
-        <AlbumView
-          album={screen.album}
-          status={status}
-          onBack={() => setScreen({ kind: 'home' })}
-          onPlayed={(s) => {
-            setStatus(s)
-            setScreen({ kind: 'playing' })
-          }}
-        />
+        <AlbumView key={screen.album.file} album={screen.album} status={status} onBack={pop} onPlayed={played} onArtist={openArtist} />
+      )}
+      {screen?.kind === 'artist' && (
+        <ArtistView key={screen.name} name={screen.name} onBack={pop} onOpenAlbum={openAlbum} onPlayed={played} />
       )}
       {config && screen?.kind === 'playing' && (
         <NowPlaying
           status={status}
           outputName={outputs.find((o) => o.id === config.audioDevice)?.name ?? 'Output'}
           bitPerfect={config.bitPerfect && config.audioDevice !== 'default'}
-          onBack={() => setScreen({ kind: 'home' })}
+          onBack={pop}
           onTransport={transport}
+          onQueue={() => open({ kind: 'queue' })}
         />
       )}
+      {screen?.kind === 'queue' && <QueueView status={status} onBack={pop} onPlayed={(s) => (setStatus(s), pop())} />}
+      {screen?.kind === 'search' && <SearchView onBack={pop} onOpenAlbum={openAlbum} onOpenArtist={openArtist} onPlayed={played} />}
       {config && screen?.kind === 'settings' && (
-        <Settings
-          config={config}
-          onConfig={setConfig}
-          onBack={() => setScreen({ kind: 'home' })}
-          onRerunSetup={() => setScreen({ kind: 'setup' })}
-        />
+        <Settings config={config} onConfig={setConfig} onBack={pop} onRerunSetup={() => setStack([{ kind: 'setup' }])} />
       )}
+      </div>
+      {power && <PowerMenu onClose={() => setPower(false)} />}
+      {screen?.kind !== 'setup' && <VolumeOsd volume={status?.volume} />}
+      {idle && <Screensaver status={status} albums={albums} />}
       {boot !== 'off' && <Boot leaving={boot === 'leaving'} />}
     </>
   )

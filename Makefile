@@ -46,6 +46,7 @@ check:
 	@echo ok
 
 image:
+	date +%Y%m%d.%H%M > image/mkosi.version
 	cd image && sudo mkosi -f build
 
 vm:

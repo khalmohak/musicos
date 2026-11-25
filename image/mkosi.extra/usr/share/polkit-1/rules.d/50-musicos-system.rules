@@ -1,0 +1,12 @@
+// The musicos UI (user "music") may shut down, restart and sleep the box, and set the time zone.
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "music") return polkit.Result.NOT_HANDLED;
+    var id = action.id;
+    if (id.indexOf("org.freedesktop.login1.power-off") === 0 ||
+        id.indexOf("org.freedesktop.login1.reboot") === 0 ||
+        id.indexOf("org.freedesktop.login1.suspend") === 0 ||
+        id === "org.freedesktop.timedate1.set-timezone") {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

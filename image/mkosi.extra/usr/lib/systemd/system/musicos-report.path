@@ -1,0 +1,8 @@
+[Unit]
+Description=Regenerate the musicos report when the UI asks
+
+[Path]
+PathChanged=/var/lib/musicos/report-request
+
+[Install]
+WantedBy=multi-user.target

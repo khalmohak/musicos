@@ -1,0 +1,5 @@
+[Unit]
+Description=Install a staged musicos update when the UI asks
+
+[Path]
+PathChanged=/var/lib/musicos/update-request

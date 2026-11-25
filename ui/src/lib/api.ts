@@ -37,7 +37,96 @@ export interface Status {
   duration: number
   audio?: AudioFormat | null
   bitrate?: number
+  pos?: number
+  queueLength?: number
   song: Song | null
+  receiver?: Receiver | null
+}
+export interface Receiver {
+  active: boolean
+  source: 'airplay' | 'spotify'
+  state: 'play' | 'pause' | ''
+  title: string
+  artist: string
+  album: string
+  cover: string
+  duration: number
+  position: number
+  device: string
+}
+export interface UpdateStatus {
+  current: string
+  staged: string | null
+  install: '' | 'queued' | 'installing' | 'installed' | 'failed'
+  progress: { state: string; done: number; total: number; error: string }
+  url: string
+  usb: { path: string; version: string }[]
+}
+export interface ReceiversInfo {
+  name: string
+  airplay: { on: boolean; installed: boolean }
+  spotify: { on: boolean; installed: boolean }
+}
+export interface QueueItem {
+  pos: number
+  file: string
+  title: string
+  artist: string
+  album: string
+  duration: number
+  current: boolean
+}
+export interface SearchTrack {
+  file: string
+  title: string
+  artist: string
+  album: string
+  duration: number
+}
+export interface SearchResult {
+  artists: { artist: string; file: string }[]
+  albums: Album[]
+  tracks: SearchTrack[]
+}
+export interface Lyrics {
+  synced: boolean
+  lines: { t: number | null; text: string }[]
+}
+export interface BtDevice {
+  mac: string
+  name: string
+  kind: 'controller' | 'keyboard' | 'audio' | 'phone' | 'other'
+  paired: boolean
+  connected: boolean
+}
+export interface BtState {
+  available: boolean
+  powered: boolean
+  demo?: boolean
+  devices: BtDevice[]
+}
+export interface DisplayInfo {
+  outputs: { name: string; current: string; modes: string[] }[]
+  demo: boolean
+}
+export interface Connection {
+  name: string
+  type: 'ethernet' | 'wifi'
+  method: string
+}
+export interface ArtistEntry {
+  artist: string
+  albums: number
+  file: string
+  photo: boolean
+}
+export interface ArtistInfo {
+  artist: string
+  albums: Album[]
+  file: string
+  photo: boolean
+  backdrop: boolean
+  logo: boolean
 }
 export interface Config {
   setupComplete: boolean
@@ -45,6 +134,13 @@ export interface Config {
   uiSounds: boolean
   audioDevice: string
   bitPerfect: boolean
+  screensaver: number
+  autoSleep: number
+  sleepSystem: boolean
+  uiScale: number
+  overscan: number
+  displayMode: string
+  onlineArt: boolean
 }
 export interface Stats {
   artists: number
@@ -55,8 +151,9 @@ export interface Stats {
 export interface AudioOutput {
   id: string
   name: string
-  kind: 'default' | 'hdmi' | 'usb' | 'analog'
+  kind: 'default' | 'hdmi' | 'usb' | 'analog' | 'bluetooth'
   detail: string
+  connected?: boolean | null
 }
 export interface Source {
   id: string
@@ -120,6 +217,7 @@ export const api = {
   play: (a: Album, pos = 0) => req<Status>('/api/play', { artist: a.artist, album: a.album, pos }),
   control: (action: 'toggle' | 'next' | 'previous' | 'stop') => req<Status>('/api/control', { action }),
   volume: (volume: number) => req<Status>('/api/volume', { volume }),
+  seek: (to: number) => req<Status>('/api/seek', { to }),
   outputs: () => req<AudioOutput[]>('/api/audio/outputs'),
   setOutput: (id: string) => req<Config>('/api/audio/output', { id }),
   testSound: (id: string) => req<{ ok: boolean }>('/api/audio/test', { id }),
@@ -128,7 +226,40 @@ export const api = {
   wifiScan: () => req<WifiNetwork[]>('/api/network/wifi'),
   wifiConnect: (ssid: string, password: string) => req<{ ok: boolean }>('/api/network/wifi', { ssid, password }),
   access: () => req<Access>('/api/access'),
+  power: (action: 'shutdown' | 'reboot' | 'sleep' | 'tv-off') => req<{ ok: boolean }>('/api/power', { action }),
+  activity: () => req<{ ok: boolean }>('/api/activity', {}),
+  timezones: () => req<{ current: string; regions: Record<string, string[]> }>('/api/timezones'),
+  setTimezone: (zone: string) => req<{ ok: boolean }>('/api/timezone', { zone }),
+  display: () => req<DisplayInfo>('/api/display'),
+  setDisplay: (output: string, mode: string) => req<Config>('/api/display', { output, mode }),
+  bluetooth: () => req<BtState>('/api/bluetooth'),
+  btScan: () => req<{ ok: boolean }>('/api/bluetooth/scan', {}),
+  btPair: (mac: string) => req<{ ok: boolean }>('/api/bluetooth/pair', { mac }),
+  btForget: (mac: string) => req<{ ok: boolean }>('/api/bluetooth/forget', { mac }),
+  wifiSaved: () => req<{ name: string; active: boolean; method: string }[]>('/api/wifi/saved'),
+  wifiForget: (name: string) => req<{ ok: boolean }>('/api/wifi/forget', { name }),
+  wifiHidden: (ssid: string, password: string) => req<{ ok: boolean }>('/api/wifi/hidden', { ssid, password }),
+  connections: () => req<Connection[]>('/api/connections'),
+  setIpv4: (b: { connection: string; method: 'auto' | 'manual'; address?: string; prefix?: number; gateway?: string; dns?: string }) =>
+    req<{ ok: boolean }>('/api/ipv4', b),
+  receivers: () => req<ReceiversInfo>('/api/receivers'),
+  setReceivers: (b: { airplay?: boolean; spotify?: boolean; name?: string }) => req<{ ok: boolean }>('/api/receivers', b),
+  update: () => req<UpdateStatus>('/api/update'),
+  checkUpdate: (url?: string) => req<{ upToDate: boolean; version: string }>('/api/update/check', url ? { url } : {}),
+  updateFromUsb: (path: string) => req<{ version: string }>('/api/update/usb', { path }),
+  installUpdate: () => req<{ ok: boolean }>('/api/update/install', {}),
+  report: () => req<{ text: string; at: number }>('/api/report'),
+  refreshReport: () => req<{ ok: boolean }>('/api/report', {}),
   sources: () => req<Source[]>('/api/sources'),
+  queue: () => req<QueueItem[]>('/api/queue'),
+  playPos: (pos: number) => req<Status>('/api/queue/play', { pos }),
+  enqueue: (a: Album, mode: 'next' | 'end') => req<Status>('/api/queue/add', { artist: a.artist, album: a.album, mode }),
+  clearQueue: () => req<Status>('/api/queue/clear', {}),
+  shuffle: (artist?: string, album?: string) => req<Status>('/api/shuffle', { artist, album }),
+  search: (term: string) => req<SearchResult>(`/api/search?q=${q(term)}`),
+  lyrics: (file: string) => req<Lyrics>(`/api/lyrics?file=${q(file)}`),
+  artists: () => req<ArtistEntry[]>('/api/artist-index'),
+  artist: (name: string) => req<ArtistInfo>(`/api/artist?name=${q(name)}`),
   addShare: (s: { name: string; server: string; share: string; path: string; username: string; password: string }) =>
     req<{ id: string }>('/api/sources/smb', s),
   removeSource: (id: string) => req<{ ok: boolean }>('/api/sources/remove', { id }),
@@ -144,6 +275,13 @@ export function coverUrl(file: string, fraction = 0.12) {
   const size = Math.min(1600, Math.max(160, Math.ceil(px / 160) * 160))
   return `/api/art?file=${q(file)}&size=${size}`
 }
+/** Artist photo / backdrop / logo from the artist's folder (folder.jpg, backdrop1.jpg, logo.png). */
+export function artistArtUrl(file: string, artist: string, kind: 'photo' | 'backdrop' | 'logo', fraction = 0.15) {
+  const px = window.innerWidth * (window.devicePixelRatio || 1) * fraction
+  const size = Math.min(2400, Math.max(160, Math.ceil(px / 160) * 160))
+  return `/api/artist-art?file=${q(file)}&artist=${q(artist)}&kind=${kind}&size=${size}`
+}
+
 /** Pre-blurred tiny cover for full-screen backdrops: no CSS blur on the device. */
 export const backdropUrl = (file: string) => `/api/art?file=${q(file)}&blur=1`
 

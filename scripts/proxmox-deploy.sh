@@ -45,8 +45,11 @@ fi
 
 if [ -n "$BUILD_HOST" ]; then
     echo ">> $PVE_HOST pulling image from $BUILD_HOST"
+    # builds are versioned: musicos/out/musicos_<version>.raw (version in image/mkosi.version)
+    ver=$(ssh -o BatchMode=yes -J "$PVE_HOST" "$BUILD_HOST" 'cat musicos/image/mkosi.version')
+    echo ">> version $ver"
     ssh "$PVE_HOST" "rsync -a --sparse -e 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' \
-        '$BUILD_HOST:musicos/out/musicos.raw' '$REMOTE_IMAGE'"
+        '$BUILD_HOST:musicos/out/musicos_$ver.raw' '$REMOTE_IMAGE'"
 else
     echo ">> copying image to $PVE_HOST:$REMOTE_IMAGE"
     rsync -h --progress --sparse "$IMAGE" "$PVE_HOST:$REMOTE_IMAGE"

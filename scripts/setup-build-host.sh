@@ -11,7 +11,7 @@ apt-get update
 apt-get install -y --no-install-recommends \
     mkosi systemd-repart systemd-boot-efi systemd-ukify \
     debian-archive-keyring apt dpkg \
-    dosfstools mtools e2fsprogs zstd cpio \
+    dosfstools mtools e2fsprogs erofs-utils zstd cpio reprepro \
     qemu-system-x86 qemu-utils ovmf \
     python3 git make rsync openssh-client
 

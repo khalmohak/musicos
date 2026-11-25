@@ -1,9 +1,0 @@
-[Unit]
-Description=Music library (SMB) automount
-
-[Automount]
-Where=/srv/music
-TimeoutIdleSec=0
-
-[Install]
-WantedBy=multi-user.target

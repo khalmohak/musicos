@@ -1,0 +1,15 @@
+# Root helper: applies audio output and network shares written by the (unprivileged) agent.
+# Runs at boot (sound cards can be renumbered) and whenever musicos-apply.path fires.
+[Unit]
+Description=Apply musicos settings (audio defaults, mounts)
+After=sound.target local-fs.target
+Before=mpd.service
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/usr/lib/musicos/agent
+Environment=MUSICOS_STATE=/var/lib/musicos
+ExecStart=/usr/bin/python3 -m musicos_agent.apply
+
+[Install]
+WantedBy=multi-user.target

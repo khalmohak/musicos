@@ -1,0 +1,3 @@
+# Re-route audio when a TV/receiver is plugged in or switched on (HDMI hotplug) or a USB DAC appears.
+SUBSYSTEM=="drm", ACTION=="change", RUN+="/usr/bin/systemctl start --no-block musicos-apply.service"
+SUBSYSTEM=="sound", ACTION=="add", KERNEL=="card*", RUN+="/usr/bin/systemctl start --no-block musicos-apply.service"

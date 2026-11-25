@@ -100,6 +100,42 @@ It boots to the musicos splash, then setup. 4K works out of the box: the UI and 
 with the screen. Firmware for Intel/AMD/NVIDIA (nouveau) graphics, Intel/Realtek Wi-Fi and NICs,
 and Intel SOF audio is included.
 
+## Disk layout and updates (A/B)
+
+```
+ESP 512M      systemd-boot + one UKI per installed version (musicos_<version>.efi, boot-counted)
+/usr  slot A  erofs, read-only, dm-verity  (the whole OS)      + verity hash partition
+/usr  slot B  empty until the first update                     + verity hash partition
+root          ext4, writable: /etc, /var, /srv/music/local, /home  (grows to fill the disk)
+```
+
+Each UKI carries `usrhash=` for its own `/usr`, so choosing a boot entry chooses the slot. Updates
+(systemd-sysupdate, `/usr/lib/sysupdate.d`) write the inactive slot plus a new UKI with 3 tries;
+if it never reaches `boot-complete.target`, systemd-boot falls back to the previous version.
+Settings, Wi-Fi, Bluetooth pairings, local music and play state live on root and are untouched.
+Logs are kept in RAM (`Storage=volatile`).
+
+Everything musicos ships lives under `/usr` (units in `/usr/lib/systemd/system`, rules in
+`/usr/lib/udev/rules.d` and `/usr/share/polkit-1/rules.d`, agent in `/usr/lib/musicos`, UI in
+`/usr/share/musicos/ui`), so it updates with the slot. Don't add files under `image/mkosi.extra/etc`.
+
+Publishing an update (after a build):
+
+```sh
+./scripts/publish-update.sh        # ~/musicos-updates on the build VM, served on :8090
+```
+
+On the box: Settings → About → Software update → set the address (`http://<build-vm>:8090`) →
+Check → Install → Restart. Or copy `~/musicos-updates` to a USB drive as `musicos-update/`.
+`scripts/vm-update-test.sh` runs the whole flow against the test VM.
+
+## AirPlay and Spotify Connect
+
+AirPlay (shairport-sync, Debian) is built in. Spotify Connect needs librespot, which Debian
+doesn't package; `scripts/fetch-spotify.sh` pulls Raspotify's pinned, checksummed amd64 build
+into `image/mkosi.packages/` (opt-in). Both play through ALSA `default`, pause local playback
+when a phone starts streaming, and show the track on the TV. Settings → AirPlay & Spotify.
+
 ## Automated test loop (Proxmox)
 
 `make test` (or `./scripts/pve-test.sh`) runs from your workstation: rsync the repo to the

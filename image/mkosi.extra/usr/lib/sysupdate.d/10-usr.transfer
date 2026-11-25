@@ -1,0 +1,17 @@
+# /usr partition: written into the free (or older) slot.
+# Source files come from scripts/publish-update.sh; the partition UUID (@u) must be preserved
+# because the UKI finds its /usr by the UUIDs derived from usrhash=.
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=regular-file
+Path=/var/lib/musicos/updates
+MatchPattern=musicos_@v.usr.@u.raw.zst
+
+[Target]
+Type=partition
+Path=auto
+MatchPattern=musicos_@v
+MatchPartitionType=usr
+ReadOnly=1

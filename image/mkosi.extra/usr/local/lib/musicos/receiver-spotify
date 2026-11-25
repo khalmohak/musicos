@@ -1,0 +1,3 @@
+#!/bin/sh
+# librespot --onevent target (it runs a program, not a command line)
+exec /usr/local/lib/musicos/receiver spotify

@@ -1,0 +1,26 @@
+#!/bin/sh
+# Hook for the network receivers (AirPlay via shairport-sync, Spotify Connect via librespot).
+#   receiver airplay start|stop            (shairport-sync sessioncontrol)
+#   receiver spotify                       (librespot --onevent; details in $PLAYER_EVENT, $NAME...)
+# Starting: pause local playback and release the sound device (bit-perfect MPD holds it).
+# Stopping: give the device back to MPD. Every event is reported to the agent for the UI.
+src="$1"
+event="${2:-${PLAYER_EVENT:-}}"
+case "$event" in
+    start|playing|session_connected|track_changed)
+        mpc -q pause 2>/dev/null; mpc -q disable musicos 2>/dev/null ;;
+    stop|session_disconnected|stopped)
+        mpc -q enable musicos 2>/dev/null ;;
+esac
+python3 - "$src" "$event" <<'PY' >/dev/null 2>&1 &
+import json, os, sys, urllib.request
+env = os.environ
+body = {"source": sys.argv[1], "event": sys.argv[2],
+        "title": env.get("NAME", ""), "artist": env.get("ARTISTS", "").replace("\n", ", "),
+        "album": env.get("ALBUM", ""), "cover": (env.get("COVERS", "").split("\n") or [""])[0],
+        "duration": int(env.get("DURATION_MS", "0") or 0) / 1000, "position": int(env.get("POSITION_MS", "0") or 0) / 1000,
+        "device": env.get("CLIENT_NAME", "")}
+req = urllib.request.Request("http://127.0.0.1:8080/api/receiver", json.dumps(body).encode(), {"Content-Type": "application/json"})
+urllib.request.urlopen(req, timeout=3)
+PY
+exit 0

@@ -1,0 +1,8 @@
+[Unit]
+Description=musicos diagnostics report shortly after boot
+
+[Timer]
+OnBootSec=75s
+
+[Install]
+WantedBy=timers.target

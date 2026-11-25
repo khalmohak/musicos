@@ -1,0 +1,21 @@
+# Boot entry: installed with 3 tries. If the new version never reaches boot-complete.target,
+# systemd-boot falls back to the previous entry (and with it the previous /usr slot).
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=regular-file
+Path=/var/lib/musicos/updates
+MatchPattern=musicos_@v.efi
+
+[Target]
+Type=regular-file
+Path=/EFI/Linux
+PathRelativeTo=boot
+MatchPattern=musicos_@v+@l-@d.efi \
+             musicos_@v+@l.efi \
+             musicos_@v.efi
+Mode=0444
+TriesLeft=3
+TriesDone=0
+InstancesMax=2

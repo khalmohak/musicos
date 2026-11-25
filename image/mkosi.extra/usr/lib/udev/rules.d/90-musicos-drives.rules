@@ -1,0 +1,4 @@
+# Music drives (USB and internal) mount themselves under /srv/music via a systemd unit,
+# so it is logged. Device-mapper (the verity /usr), loop, zram and optical devices are skipped; (journalctl -u 'musicos-automount@*') and never killed by udev.
+ACTION=="add", SUBSYSTEM=="block", KERNEL!="dm-*|loop*|zram*|sr*", ENV{ID_FS_USAGE}=="filesystem", TAG+="systemd", ENV{SYSTEMD_WANTS}+="musicos-automount@%k.service"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", RUN{program}+="/usr/bin/systemd-mount --umount $devnode"

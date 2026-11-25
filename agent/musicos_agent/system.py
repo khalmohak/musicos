@@ -9,7 +9,7 @@ import sys
 import tempfile
 import wave
 
-from . import config
+from . import audio, config
 
 
 def device_info(port):
@@ -33,43 +33,29 @@ def device_info(port):
 
 # ---- audio ----
 def audio_outputs():
-    """Playback devices from /proc/asound, classified for the setup screen."""
-    outs = [{"id": "default", "name": "System default", "kind": "default", "detail": "Let the system choose"}]
+    """Playback devices for the setup/settings screens. HDMI ports show whether a display is
+    attached; "System default" says where it currently goes."""
     if not os.path.exists("/proc/asound/pcm"):
-        # dev machine: representative devices so the setup screen can be designed
-        outs += [{"id": "plughw:CARD=HDMI,DEV=3", "name": "TV (HDMI)", "kind": "hdmi", "detail": "demo device"},
-                 {"id": "plughw:CARD=DAC,DEV=0", "name": "USB DAC", "kind": "usb", "detail": "demo device"}]
-        return outs
-    cards = {}
-    try:
-        with open("/proc/asound/cards") as fh:
-            lines = fh.read().splitlines()
-        for i in range(0, len(lines) - 1, 2):
-            head = lines[i].strip()
-            if not head or not head[0].isdigit():
-                continue
-            num = head.split()[0]
-            cid = head.split("[", 1)[1].split("]", 1)[0].strip()
-            driver = head.split("]:", 1)[1].split(" - ")[0].strip()
-            cards[num] = {"id": cid, "driver": driver, "long": lines[i + 1].strip()}
-    except (OSError, IndexError):
-        pass
-    with open("/proc/asound/pcm") as fh:
-        for line in fh:
-            parts = [p.strip() for p in line.split(":")]
-            if len(parts) < 4 or "playback" not in parts[-1]:
-                continue
-            card_num, dev_num = (int(x) for x in parts[0].split("-"))
-            card = cards.get(str(card_num), {"id": str(card_num), "driver": "", "long": ""})
-            name = parts[1]
-            if "hdmi" in name.lower() or "hdmi" in card["long"].lower():
-                kind, pretty = "hdmi", "TV / receiver (HDMI %d)" % dev_num
-            elif card["driver"] == "USB-Audio":
-                kind, pretty = "usb", card["long"].split(" at ")[0] or "USB DAC"
-            else:
-                kind, pretty = "analog", "%s (analog)" % card["id"]
-            outs.append({"id": "plughw:CARD=%s,DEV=%d" % (card["id"], dev_num), "name": pretty,
-                         "kind": kind, "detail": name})
+        # dev machine: representative devices so the screens can be designed
+        return [{"id": "default", "name": "System default", "kind": "default", "detail": "TV (HDMI) right now"},
+                {"id": "plughw:CARD=HDMI,DEV=3", "name": "LG TV (HDMI)", "kind": "hdmi", "detail": "Connected"},
+                {"id": "plughw:CARD=DAC,DEV=0", "name": "USB DAC", "kind": "usb", "detail": "demo device"}]
+    devs = audio.devices()
+    best = audio.best_default(devs)
+    outs = [{"id": "default", "name": "System default", "kind": "default",
+             "detail": ("Follows your TV or DAC · now %s" % audio.pretty_name(best)) if best else "No sound hardware found"}]
+    for d in devs:
+        if d["kind"] == "hdmi":
+            detail = "Connected" if d["connected"] else ("Nothing attached" if d["connected"] is False else d["pcmName"])
+        else:
+            detail = d["pcmName"]
+        outs.append({"id": d["id"], "name": audio.pretty_name(d), "kind": d["kind"], "detail": detail,
+                     "connected": d["connected"]})
+    from . import device
+    outs += device.bt_audio_outputs()
+    # connected HDMI first, then DACs, Bluetooth, the rest; unplugged HDMI ports last
+    rank = {"default": 0, "usb": 2, "bluetooth": 2, "analog": 3}
+    outs.sort(key=lambda o: rank.get(o["kind"], 1 if o.get("connected") else 4))
     return outs
 
 

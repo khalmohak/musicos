@@ -18,6 +18,17 @@ DEFAULTS = {
     "uiSounds": True,
     "audioDevice": "default",
     "bitPerfect": False,
+    "screensaver": 5,  # minutes of no input; 0 = never
+    "autoSleep": 0,  # minutes idle and not playing before the TV is switched off (CEC); 0 = never
+    "sleepSystem": False,  # also suspend the box itself
+    "uiScale": 1.0,
+    "overscan": 0,  # percent of the screen to pad on each side (TVs that crop the edges)
+    "displayMode": "",  # "1920x1080@60"; empty = the TV's preferred mode
+    "onlineArt": True,
+    "updateUrl": "",  # e.g. http://<build host>:8090 (scripts/publish-update.sh)
+    "spotify": True,
+    "airplay": True,
+    "receiverName": "musicos",
 }
 EDITABLE = set(DEFAULTS)
 
