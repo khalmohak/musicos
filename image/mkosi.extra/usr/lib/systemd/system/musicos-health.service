@@ -1,0 +1,15 @@
+# Boot health check. A new version only counts as good (systemd-bless-boot marks its boot entry
+# as good) once the player answers. If it does not, and this is a trial boot of a fresh update,
+# reboot: after 3 failed tries systemd-boot goes back to the previous version by itself.
+[Unit]
+Description=musicos boot health check
+After=musicos-agent.service
+Wants=musicos-agent.service
+Before=boot-complete.target
+OnFailure=musicos-health-failed.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/musicos/health-check
+TimeoutStartSec=4min

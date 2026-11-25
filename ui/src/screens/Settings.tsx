@@ -1,7 +1,8 @@
-import { Airplay, AudioLines, Bluetooth, Clock, FileText, Gamepad2, Info, Library, MonitorPlay, RefreshCw, RotateCcw, SquareTerminal, Tv, Wifi } from 'lucide-react'
+import { Airplay, AudioLines, HardDriveDownload, Bluetooth, Clock, FileText, Gamepad2, Info, Library, MonitorPlay, RefreshCw, RotateCcw, SquareTerminal, Tv, Wifi } from 'lucide-react'
 import { RemoteIcon } from '../components/icons'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { AccessCard, BluetoothPanel, DisplayPanel, LibraryPanel, NetworkExtras, NetworkPanel, ReceiversPanel, SoundPanel, TimezonePicker, UpdatePanel } from '../components/panels'
+import { InstallPanel } from '../components/InstallPanel'
 import { Record, Wordmark } from '../components/Record'
 import { Row } from '../components/ui'
 import { PhotoBackdrop } from '../components/PhotoBackdrop'
@@ -20,6 +21,7 @@ const SECTIONS = [
   { id: 'time', label: 'Time zone', icon: Clock },
   { id: 'remote', label: 'Remotes & controllers', icon: Gamepad2 },
   { id: 'access', label: 'Copy music in', icon: SquareTerminal },
+  { id: 'system', label: 'Updates & install', icon: HardDriveDownload },
   { id: 'about', label: 'About', icon: Info },
 ] as const
 type SectionId = (typeof SECTIONS)[number]['id']
@@ -30,6 +32,10 @@ export function Settings({
   const [section, setSection] = useState<SectionId>(() => (new URLSearchParams(location.search).get('section') as SectionId) || 'audio')
   const [zone, setZone] = useState<'nav' | 'panel'>('nav')
   const nav = useRef<HTMLDivElement>(null)
+  const [updateReady, setUpdateReady] = useState(false)
+  useEffect(() => {
+    api.update().then((u) => setUpdateReady(!!u.available || u.install === 'installed')).catch(() => {})
+  }, [])
   const panel = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -107,6 +113,7 @@ export function Settings({
             >
               <s.icon className="size-[1.3rem]" strokeWidth={1.75} />
               {s.label}
+              {s.id === 'system' && updateReady && <span className="ml-auto size-2 rounded-full bg-current" />}
             </button>
           )
         })}
@@ -130,6 +137,12 @@ export function Settings({
           {section === 'access' && <AccessSection />}
           {section === 'display' && <DisplayPanel config={config} onConfig={onConfig} />}
           {section === 'remote' && <RemoteSection />}
+          {section === 'system' && (
+            <div className="flex flex-col gap-10">
+              <UpdatePanel />
+              <InstallPanel />
+            </div>
+          )}
           {section === 'about' && <About onRerunSetup={onRerunSetup} />}
         </div>
       </section>
@@ -178,7 +191,6 @@ function About({ onRerunSetup }: { onRerunSetup: () => void }) {
           <div className="mt-1 text-[0.85rem] text-white/45">{a?.hostname ?? ''}</div>
         </div>
       </div>
-      <UpdatePanel />
       <div className="flex flex-col gap-1 px-1">
         <div className="eyebrow mb-1">Photography</div>
         {BACKDROPS.map((b) => (

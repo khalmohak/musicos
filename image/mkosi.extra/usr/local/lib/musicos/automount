@@ -7,6 +7,8 @@
 # LVM/RAID members, optical media. Failures never block boot (automount, short timeout).
 set -u
 dev="$1"
+# musicos is being installed onto a disk right now: leave every new partition alone
+[ -e /run/musicos/installing ] && exit 0
 [ -b "$dev" ] || exit 0
 case "$(basename "$dev")" in dm-*|loop*|zram*|sr*) exit 0 ;; esac
 # run from musicos-automount@.service: load the device's udev properties (ID_FS_TYPE, ID_BUS...)
@@ -20,12 +22,15 @@ case "${ID_FS_TYPE:-}" in
 esac
 
 # GPT/MBR partition types that are never music: EFI system, Microsoft reserved,
-# Windows recovery, BIOS boot, Linux /boot (XBOOTLDR)
+# Windows recovery, BIOS boot, Linux /boot (XBOOTLDR), and another musicos disk's
+# root / usr / usr-verity (e.g. the SSD it was installed on, seen from the USB stick)
 ptype=$(printf '%s' "${ID_PART_ENTRY_TYPE:-}" | tr 'A-Z' 'a-z')
 case "$ptype" in
     c12a7328-f81f-11d2-ba4b-00a0c93ec93b|e3c9e316-0b5c-4db8-817d-f92df00215ae|\
     de94bba4-06d1-4d40-a16a-bfd50179d6ac|21686148-6449-6e6f-744e-656564454649|\
-    bc13c2ff-59e6-4262-a352-b275fd6f7172|0xef|0x27) exit 0 ;;
+    bc13c2ff-59e6-4262-a352-b275fd6f7172|0xef|0x27|\
+    4f68bce3-e8cd-4db1-96e7-fbcaf984b709|8484680c-9521-48c6-9c11-b0720656f69e|\
+    77ff5f63-e7b6-4633-acf4-1565b864c0e6) exit 0 ;;
 esac
 
 # the disk musicos itself runs from (USB stick or SSD)

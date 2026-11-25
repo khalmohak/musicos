@@ -4,7 +4,7 @@ ProtectVersion=%A
 [Source]
 Type=regular-file
 Path=/var/lib/musicos/updates
-MatchPattern=musicos_@v.usr-verity.@u.raw.zst
+MatchPattern=musicos_@v.usr-verity.@u.raw
 
 [Target]
 Type=partition
@@ -12,3 +12,5 @@ Path=auto
 MatchPattern=musicos_@v_verity
 MatchPartitionType=usr-verity
 ReadOnly=1
+# never set the grow-filesystem flag on a read-only erofs /usr
+GrowFileSystem=no

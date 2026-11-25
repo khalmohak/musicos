@@ -1,0 +1,12 @@
+#!/bin/sh
+# Passes once the musicos agent answers on its API (it starts in a few seconds normally).
+i=0
+while [ $i -lt 90 ]; do
+    if curl -fsS -m 3 -o /dev/null http://127.0.0.1:8080/api/status; then
+        echo "musicos health: agent answers"
+        exit 0
+    fi
+    i=$((i + 1)); sleep 2
+done
+echo "musicos health: agent did not answer in 3 minutes"
+exit 1

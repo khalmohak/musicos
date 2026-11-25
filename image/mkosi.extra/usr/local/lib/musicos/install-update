@@ -1,12 +1,21 @@
 #!/bin/sh
-# Run by musicos-update.service (root): install the update staged in /var/lib/musicos/updates
-# into the inactive /usr slot + ESP. The UI reads update-status.json; the reboot is the user's.
+# Install the update staged (verified + unpacked) in /var/lib/musicos/updates into the inactive
+# /usr slot + ESP with systemd-sysupdate. Run by musicos-update.service when the UI asks, or by
+# `musicos-update` over SSH. The UI reads update-status.json; the reboot is the user's.
+dir=/var/lib/musicos/updates
 st=/var/lib/musicos/update-status.json
 log=/var/lib/musicos/update.log
-printf '{"state": "installing"}\n' > "$st"
+ver=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$dir/latest.json" 2>/dev/null)
+printf '{"state": "installing", "version": "%s"}\n' "$ver" > "$st"
+chmod 644 "$st"
 if /usr/lib/systemd/systemd-sysupdate --no-pager update > "$log" 2>&1; then
-    printf '{"state": "installed"}\n' > "$st"
+    printf '{"state": "installed", "version": "%s"}\n' "$ver" > "$st"
+    # the slot now holds it: free the space (the images are ~3 GB unpacked)
+    find "$dir" -mindepth 1 -delete
+    rc=0
 else
-    printf '{"state": "failed"}\n' > "$st"
+    printf '{"state": "failed", "version": "%s"}\n' "$ver" > "$st"
+    rc=1
 fi
 chmod 644 "$st" "$log"
+exit $rc

@@ -86,6 +86,13 @@ step "reboot into $new"
 api POST /api/power '{"action":"reboot"}' || true
 wait_reboot
 sleep 20
-g ". /usr/lib/os-release; echo version \$IMAGE_VERSION; findmnt -no SOURCE /usr; systemctl is-active musicos-agent musicos-kiosk; ls /boot/EFI/Linux; ls /srv/music; cat /var/lib/musicos/config.json | head -3"
+g ". /usr/lib/os-release; echo version \$IMAGE_VERSION; findmnt -no SOURCE /usr; systemctl is-active musicos-agent musicos-kiosk musicos-health; ls /boot/EFI/Linux; ls /srv/music; cat /var/lib/musicos/config.json | head -3"
 now=$(g ". /usr/lib/os-release; echo \$IMAGE_VERSION")
-if [ "$now" = "$new" ]; then step "PASS: $old -> $new, settings kept"; else step "FAIL: still on $now (expected $new)"; exit 1; fi
+[ "$now" = "$new" ] || { step "FAIL: still on $now (expected $new)"; exit 1; }
+# the health check passed and systemd-bless-boot dropped the tries counter: the entry is good
+for i in $(seq 1 30); do
+    g "ls /boot/EFI/Linux" | grep -qx "musicos_$new.efi" && break
+    sleep 3
+done
+g "ls /boot/EFI/Linux" | grep -qx "musicos_$new.efi" || { step "FAIL: boot entry for $new not marked good"; g "ls /boot/EFI/Linux; systemctl status musicos-health boot-complete.target systemd-bless-boot --no-pager | head -30"; exit 1; }
+step "PASS: $old -> $new, boot entry marked good, settings kept"

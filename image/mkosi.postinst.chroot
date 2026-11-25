@@ -41,11 +41,24 @@ static_enable() {  # unit target
     ln -sf "../$1" "/usr/lib/systemd/system/$2.wants/$1"
 }
 for u in musicos-agent.service musicos-apply.path musicos-apply.service musicos-input.service \
-         musicos-report.path musicos-update.path musicos-spotify.service; do
+         musicos-report.path musicos-update.path musicos-install.path musicos-spotify.service; do
     [ -e "/usr/lib/systemd/system/$u" ] && static_enable "$u" multi-user.target
 done
 static_enable musicos-kiosk.service graphical.target
 static_enable musicos-report.timer timers.target
+# boot health check: a new version is only marked good once the player answers
+mkdir -p /usr/lib/systemd/system/boot-complete.target.requires
+ln -sf ../musicos-health.service /usr/lib/systemd/system/boot-complete.target.requires/musicos-health.service
+
+# Remote care over SSH (diagnostics, updates, repairs) without passwords: "music" may sudo.
+# DEV-grade, like the passwords above: the box trusts its LAN.
+printf 'music ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/musicos
+chmod 440 /etc/sudoers.d/musicos
+# SSH keys baked in at build time from image/local/authorized_keys (not in git)
+if [ -f "$CHROOT_SRCDIR/local/authorized_keys" ]; then
+    install -d -m 700 -o music -g music /home/music/.ssh
+    install -m 600 -o music -g music "$CHROOT_SRCDIR/local/authorized_keys" /home/music/.ssh/authorized_keys
+fi
 # NetworkManager owns networking. networkd's wait-online would block network-online.target
 # forever (and with it multi-user.target and boot-complete, so A/B updates would never be
 # marked good). Mask, not disable: mkosi's preset step re-enables disabled units.

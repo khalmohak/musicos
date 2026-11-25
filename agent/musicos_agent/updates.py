@@ -6,20 +6,29 @@ An update is a folder with latest.json + the files systemd-sysupdate installs:
     musicos_<v>.usr-verity.<uuid>.raw.zst
     musicos_<v>.efi                           unified kernel image (boot entry)
 It's published by scripts/publish-update.sh and fetched from a URL (Settings) or from a
-"musicos-update" folder on any USB drive. Files are verified against latest.json (sha256)
-before the root-only musicos-update.service installs them into the inactive slot.
+"musicos-update" folder on any USB drive. Files are verified against latest.json (sha256),
+the partition images are unpacked to .raw (systemd-sysupdate copies local files as-is), and
+the root-only musicos-update.service installs them into the inactive slot.
+
+Also a command line for SSH (as root, see /usr/local/bin/musicos-update):
+    python3 -m musicos_agent.updates [URL]     check, download, verify, unpack; then install
 """
 import glob
 import hashlib
 import json
 import os
 import shutil
+import subprocess
+import sys
 import threading
+import time
 import urllib.request
 
 from . import config
 
 PROGRESS = {"state": "idle", "done": 0, "total": 0, "error": ""}
+# result of the last automatic check: {"version", "checked"} (version "" = up to date)
+AVAILABLE = {"version": "", "checked": 0.0, "error": ""}
 _lock = threading.Lock()
 
 
@@ -62,19 +71,49 @@ def usb_updates():
     return out
 
 
-def status():
-    st = {}
+def _booted_at():
     try:
-        st = json.load(open(os.path.join(config.state_dir(), "update-status.json")))
+        return time.time() - float(open("/proc/uptime").read().split()[0])
     except (OSError, ValueError):
-        pass
+        return 0.0
+
+
+def _install_state():
+    """"", queued, installing, installed (restart pending), failed, or rolledback (the new
+    version was installed but this boot is still the old one: it failed to start)."""
+    path = os.path.join(config.state_dir(), "update-status.json")
+    try:
+        st = json.load(open(path))
+        mtime = os.stat(path).st_mtime
+    except (OSError, ValueError):
+        return "", ""
+    state, ver = st.get("state", ""), st.get("version", "")
+    if state == "installed":
+        if ver and ver == current_version():
+            return "", ver  # done: we are running it
+        if mtime < _booted_at() - 5 and ver:
+            return "rolledback", ver  # rebooted since, but still on the old version
+    return state, ver
+
+
+def status():
+    state, ver = _install_state()
     staged = None
     try:
         staged = json.load(open(os.path.join(updates_dir(), "latest.json")))["version"]
     except (OSError, ValueError, KeyError):
         pass
-    return {"current": current_version(), "staged": staged, "install": st.get("state", ""),
-            "progress": dict(PROGRESS), "url": config.load().get("updateUrl", ""), "usb": usb_updates()}
+    return {"current": current_version(), "staged": staged, "install": state, "installVersion": ver,
+            "progress": dict(PROGRESS), "url": config.load().get("updateUrl", ""), "usb": usb_updates(),
+            "available": AVAILABLE["version"], "checked": AVAILABLE["checked"], "checkError": AVAILABLE["error"],
+            "log": _tail(os.path.join(config.state_dir(), "update.log"))}
+
+
+def _tail(path, n=12):
+    try:
+        return open(path, errors="replace").read().splitlines()[-n:]
+    except OSError:
+        return []
 
 
 def _sha256(path):
@@ -102,9 +141,25 @@ def _stage(manifest, fetch):
             os.remove(tmp)
             raise ValueError("checksum mismatch for %s" % name)
         os.replace(tmp, os.path.join(d, name))
+    PROGRESS.update(state="unpacking")
+    for name in os.listdir(d):
+        if name.endswith(".raw.zst"):
+            _unpack(os.path.join(d, name))
     with open(os.path.join(d, "latest.json"), "w") as fh:
         json.dump(manifest, fh)
     PROGRESS.update(state="ready")
+
+
+def _unpack(path):
+    """foo.raw.zst -> foo.raw (sparse). systemd-sysupdate writes a local file to the partition
+    byte for byte, so it must be the plain image."""
+    out = path[:-4]
+    r = subprocess.run(["zstd", "-q", "-d", "-f", "--sparse", path, "-o", out + ".part"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError("unpack failed: %s" % (r.stderr.strip() or r.returncode))
+    os.replace(out + ".part", out)
+    os.remove(path)
 
 
 def _copy_progress(src, dst):
@@ -166,6 +221,21 @@ def from_usb(path):
     return {"version": manifest["version"]}
 
 
+def auto_check():
+    """Background: look for a newer version at the update address every 6 hours.
+    Only checks (a few hundred bytes); downloading and installing stay the user's call."""
+    time.sleep(90)
+    while True:
+        url = config.load().get("updateUrl", "")
+        if url:
+            try:
+                v = check_url(url)["version"]
+                AVAILABLE.update(version=v if newer(v, current_version()) else "", checked=time.time(), error="")
+            except Exception as e:
+                AVAILABLE.update(checked=time.time(), error=str(e)[:200])
+        time.sleep(6 * 3600)
+
+
 def install():
     if PROGRESS.get("state") not in ("ready", "idle") and not os.path.exists(os.path.join(updates_dir(), "latest.json")):
         raise RuntimeError("nothing staged")
@@ -179,3 +249,26 @@ def install():
 def discard():
     shutil.rmtree(updates_dir(), ignore_errors=True)
     PROGRESS.update(state="idle", done=0, total=0, error="")
+
+
+def main(argv):
+    """musicos-update [URL]: the same download/verify/unpack as the UI, then install. For SSH."""
+    url = (argv[0] if argv else "") or config.load().get("updateUrl", "")
+    if not url:
+        print("usage: musicos-update URL   (or set the update address in Settings)")
+        return 2
+    m = check_url(url)
+    print("installed %s, available %s" % (current_version(), m["version"]))
+    if not newer(m["version"], current_version()) and "--force" not in argv:
+        print("already up to date (--force to reinstall)")
+        return 0
+    url = url.rstrip("/")
+    _stage(m, lambda name, tmp: _copy_progress(urllib.request.urlopen("%s/%s" % (url, name), timeout=30), tmp))
+    print("downloaded and verified; installing")
+    r = subprocess.run(["/usr/local/lib/musicos/install-update"])
+    print(open(os.path.join(config.state_dir(), "update.log")).read())
+    return r.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

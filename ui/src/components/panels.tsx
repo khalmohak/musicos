@@ -867,21 +867,33 @@ export function UpdatePanel() {
   const p = u?.progress
   const pct = p?.total ? Math.round((100 * p.done) / p.total) : 0
   const staged = u?.staged && u.install !== 'installed'
+  const fetching = p?.state === 'downloading' || p?.state === 'unpacking'
+  const note =
+    p?.state === 'failed'
+      ? `Update failed: ${p.error}`
+      : u?.install === 'failed'
+        ? 'Installing failed; this version is untouched.'
+        : u?.install === 'rolledback'
+          ? `Version ${u.installVersion} didn't start properly, so musicos went back to ${u.current}.`
+          : msg || (u?.checkError && u.url ? `Couldn't reach the update server: ${u.checkError}` : '')
   return (
     <div ref={ref} className="flex flex-col gap-2">
       <div className="eyebrow mb-1 px-1">Software update</div>
       <Row icon={Info} title={`Version ${u?.current ?? '…'}`} sub="Updates install next to this version. If a new version doesn't start, musicos goes back to this one by itself." />
       {u?.install === 'installed' ? (
-        <Row icon={RotateCcw} title={`Restart to finish (${u.staged})`} sub="Your music, settings and Wi-Fi stay as they are." onClick={() => (sfx.select(), api.power('reboot'))} />
+        <Row icon={RotateCcw} title={`Restart to finish (${u.installVersion})`} sub="Your music, settings and Wi-Fi stay as they are." onClick={() => (sfx.select(), api.power('reboot'))} />
       ) : u?.install === 'installing' || u?.install === 'queued' ? (
         <Row icon={RefreshCw} title="Installing…" sub="A minute or two. Keep musicos on." />
-      ) : staged && p?.state !== 'downloading' ? (
+      ) : staged && !fetching ? (
         <Row icon={Download} title={`Install ${u.staged}`} sub="Downloaded and verified" onClick={async () => (sfx.select(), await api.installUpdate().catch((e) => setMsg((e as Error).message)), load())} />
       ) : (
         <Row
-          icon={(pp: { className?: string; strokeWidth?: number }) => <RefreshCw {...pp} className={`${pp.className} ${p?.state === 'downloading' ? 'mo-spin' : ''}`} />}
-          title={p?.state === 'downloading' ? `Downloading… ${pct}%` : 'Check for updates'}
-          sub={u?.url ? `From ${u.url}` : 'Set the address of your update server first'}
+          icon={(pp: { className?: string; strokeWidth?: number }) => <RefreshCw {...pp} className={`${pp.className} ${fetching ? 'mo-spin' : ''}`} />}
+          title={
+            p?.state === 'downloading' ? `Downloading… ${pct}%` : p?.state === 'unpacking' ? 'Unpacking…' : u?.available ? `Download ${u.available}` : 'Check for updates'
+          }
+          sub={u?.available && !fetching ? 'A new version is available' : u?.url ? `From ${u.url}` : 'Set the address of your update server first'}
+          trailing={u?.available && !fetching ? <span className="size-2.5 shrink-0 rounded-full bg-white" /> : undefined}
           onClick={() => (u?.url ? check() : (sfx.select(), setEntering('http://')))}
         />
       )}
@@ -889,7 +901,12 @@ export function UpdatePanel() {
       {u?.usb.map((x) => (
         <Row key={x.path} icon={Usb} title={`Install ${x.version} from USB`} sub={x.path} onClick={async () => (sfx.select(), await api.updateFromUsb(x.path).catch((e) => setMsg((e as Error).message)), load())} />
       ))}
-      <Note>{p?.state === 'failed' ? `Update failed: ${p.error}` : u?.install === 'failed' ? 'Installing failed; this version is untouched. See Diagnostics.' : msg}</Note>
+      <Note>{note}</Note>
+      {(u?.install === 'failed' || p?.state === 'failed') && u?.log.length ? (
+        <pre className="max-h-[12rem] overflow-hidden rounded-[0.8rem] bg-black/40 px-4 py-3 font-mono text-[0.72rem] leading-relaxed whitespace-pre-wrap text-white/55">
+          {u.log.join('\n')}
+        </pre>
+      ) : null}
     </div>
   )
 }

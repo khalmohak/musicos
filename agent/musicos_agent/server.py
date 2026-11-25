@@ -6,12 +6,13 @@ import mimetypes
 import os
 import re
 import subprocess
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import time as _time
 
-from . import config, device, receivers, system, updates
+from . import config, device, installer, receivers, system, updates
 from .mpd import MPDError
 
 try:
@@ -440,6 +441,8 @@ def make_handler(client, ui_dir, covers, port):
                                             "spotify": {"on": cfg.get("spotify", True), "installed": os.path.exists("/usr/bin/librespot")}})
                 if p == "/api/update":
                     return self._send(200, updates.status())
+                if p == "/api/install":
+                    return self._send(200, installer.disks())
                 if p == "/api/timezones":
                     return self._send(200, device.timezones())
                 if p == "/api/display":
@@ -526,6 +529,8 @@ def make_handler(client, ui_dir, covers, port):
                     return self._send(200, updates.from_usb(b["path"]))
                 elif p == "/api/update/install":
                     return self._send(200, updates.install())
+                elif p == "/api/install":
+                    return self._send(200, installer.request(b["path"], b.get("serial", ""), b["size"]))
                 elif p == "/api/update/discard":
                     updates.discard()
                     return self._send(200, {"ok": True})
@@ -621,6 +626,8 @@ def serve(client, ui_dir, host, port, music_root):
         watch_sources(client, os.path.realpath(music_root))
     auto_sleep(client)
     receivers.start()
+    if type(client).__name__ == "MPDClient":
+        threading.Thread(target=updates.auto_check, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), make_handler(client, ui_dir, covers, port))
     print("musicos-agent on http://%s:%d (ui: %s, music: %s, backend: %s)"
           % (host, port, ui_dir, music_root, type(client).__name__), flush=True)

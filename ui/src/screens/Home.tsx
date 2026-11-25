@@ -6,7 +6,7 @@ import { NowPlayingBar } from '../components/NowPlayingBar'
 import { Record } from '../components/Record'
 import { PhotoBackdrop } from '../components/PhotoBackdrop'
 import { FormatBadges } from '../components/ui'
-import { type Album, type ArtistEntry, type Status, albumKey, artistArtUrl, coverUrl } from '../lib/api'
+import { type Album, type ArtistEntry, type Status, albumKey, api, artistArtUrl, coverUrl } from '../lib/api'
 import { setAccentFrom } from '../lib/color'
 import { gridMove, stepTo } from '../lib/grid'
 import { useRemote } from '../lib/keys'
@@ -59,6 +59,14 @@ export function Home({
 }) {
   const [zone, setZone] = useState<'header' | 'grid' | 'bar'>('grid')
   const [hIdx, setHIdx] = useState(0)
+  // a dot on Settings when a newer version is waiting (the agent checks every 6 hours)
+  const [updateReady, setUpdateReady] = useState(false)
+  useEffect(() => {
+    const poll = () => api.update().then((u) => setUpdateReady(!!u.available || u.install === 'installed')).catch(() => {})
+    poll()
+    const t = setInterval(poll, 5 * 60_000)
+    return () => clearInterval(t)
+  }, [])
   const idx = Math.min(focus[tab], Math.max(0, (tab === 'albums' ? albums.length : artists.length) - 1))
   const tiles = useRef<(HTMLElement | null)[]>([])
   const clock = useClock()
@@ -161,18 +169,19 @@ export function Home({
       </span>
     )
   }
-  const iconBtn = (i: number, Icon: typeof Search) => {
+  const iconBtn = (i: number, Icon: typeof Search, dot = false) => {
     const focused = zone === 'header' && hIdx === i
     return (
       <span
         key={i}
         onClick={() => headerClick(i)}
         onMouseEnter={() => (setZone('header'), setHIdx(i))}
-        className={`flex size-[2.6rem] items-center justify-center rounded-full transition-[transform,background-color,color] duration-200 ${
+        className={`relative flex size-[2.6rem] items-center justify-center rounded-full transition-[transform,background-color,color] duration-200 ${
           focused ? 'scale-110 bg-white text-[rgb(12_12_14)]' : 'bg-white/[0.08] text-white/70'
         }`}
       >
         <Icon className="size-[1.2rem]" strokeWidth={1.9} />
+        {dot && <span className="absolute top-[0.2rem] right-[0.2rem] size-[0.55rem] rounded-full bg-white ring-2 ring-[rgb(12_12_14)]" />}
       </span>
     )
   }
@@ -190,7 +199,7 @@ export function Home({
           <div className="flex items-center gap-3">
             <span className="mr-3 text-[1.05rem] font-medium tabular-nums text-white/70">{clock}</span>
             {iconBtn(2, Search)}
-            {iconBtn(3, SettingsIcon)}
+            {iconBtn(3, SettingsIcon, updateReady)}
             {iconBtn(4, Power)}
           </div>
         </div>

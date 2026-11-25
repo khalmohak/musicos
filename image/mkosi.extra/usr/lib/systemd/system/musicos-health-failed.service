@@ -1,0 +1,6 @@
+[Unit]
+Description=musicos boot health check failed: retry or roll back
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/musicos/trial-boot-failed "health check failed"

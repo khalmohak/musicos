@@ -41,8 +41,9 @@ PY
 cd ..
 rm -rf "$dst.old"; [ -d "$dst" ] && mv "$dst" "$dst.old"; mv "$dst.new" "$dst"; rm -rf "$dst.old"
 du -sh "$dst" | cut -f1 | sed "s/^/update $v: /"
-# serve it (once): a tiny static web server, restarted if it isn't running
-if ! pgrep -f "http.server $PORT" >/dev/null; then
+# served by musicos-updates.service (python3 -m http.server on :8090, set up once on the build
+# VM, survives reboots). Fall back to a one-off server if that unit isn't installed.
+if ! systemctl is-active -q musicos-updates.service 2>/dev/null && ! pgrep -f "^python3 -m http.server $PORT" >/dev/null; then
     nohup python3 -m http.server "$PORT" --directory "$dst" >/tmp/musicos-updates.log 2>&1 &
     sleep 1
 fi

@@ -1,0 +1,9 @@
+Package: musicos-initrd
+Version: 1.0
+Architecture: all
+Section: admin
+Priority: optional
+Maintainer: musicos
+Description: musicos initrd hooks
+ On a trial boot of a fresh update, reboot instead of waiting at the emergency prompt,
+ so systemd-boot's boot counting can fall back to the previous version.

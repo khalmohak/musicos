@@ -1,5 +1,7 @@
 # /usr partition: written into the free (or older) slot.
-# Source files come from scripts/publish-update.sh; the partition UUID (@u) must be preserved
+# Source: the agent verifies the downloaded .zst files and unpacks them to .raw here
+# (sysupdate copies a local regular-file as-is; it only decompresses url-file sources).
+# Published by scripts/publish-update.sh; the partition UUID (@u) must be preserved
 # because the UKI finds its /usr by the UUIDs derived from usrhash=.
 [Transfer]
 ProtectVersion=%A
@@ -7,7 +9,7 @@ ProtectVersion=%A
 [Source]
 Type=regular-file
 Path=/var/lib/musicos/updates
-MatchPattern=musicos_@v.usr.@u.raw.zst
+MatchPattern=musicos_@v.usr.@u.raw
 
 [Target]
 Type=partition
@@ -15,3 +17,5 @@ Path=auto
 MatchPattern=musicos_@v
 MatchPartitionType=usr
 ReadOnly=1
+# never set the grow-filesystem flag on a read-only erofs /usr
+GrowFileSystem=no

@@ -57,10 +57,43 @@ export interface Receiver {
 export interface UpdateStatus {
   current: string
   staged: string | null
-  install: '' | 'queued' | 'installing' | 'installed' | 'failed'
+  install: '' | 'queued' | 'installing' | 'installed' | 'failed' | 'rolledback'
+  installVersion: string
   progress: { state: string; done: number; total: number; error: string }
   url: string
   usb: { path: string; version: string }[]
+  available: string
+  checked: number
+  checkError: string
+  log: string[]
+}
+export interface InstallDisk {
+  path: string
+  name: string
+  serial: string
+  size: number
+  sizeText: string
+  kind: string
+  usb: boolean
+  parts: { name: string; mounted: string[] }[]
+  ok?: boolean
+  why?: string
+}
+export interface InstallStatus {
+  state: 'idle' | 'queued' | 'running' | 'done' | 'failed'
+  step?: string
+  pct?: number
+  target?: string
+  error?: string
+  warning?: string
+}
+export interface InstallInfo {
+  disks: InstallDisk[]
+  boot: InstallDisk | null
+  needed: number
+  neededText: string
+  fromUsb: boolean
+  status: InstallStatus
 }
 export interface ReceiversInfo {
   name: string
@@ -248,6 +281,8 @@ export const api = {
   checkUpdate: (url?: string) => req<{ upToDate: boolean; version: string }>('/api/update/check', url ? { url } : {}),
   updateFromUsb: (path: string) => req<{ version: string }>('/api/update/usb', { path }),
   installUpdate: () => req<{ ok: boolean }>('/api/update/install', {}),
+  installInfo: () => req<InstallInfo>('/api/install'),
+  installTo: (d: InstallDisk) => req<{ ok: boolean }>('/api/install', { path: d.path, serial: d.serial, size: d.size }),
   report: () => req<{ text: string; at: number }>('/api/report'),
   refreshReport: () => req<{ ok: boolean }>('/api/report', {}),
   sources: () => req<Source[]>('/api/sources'),

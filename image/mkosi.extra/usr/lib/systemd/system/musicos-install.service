@@ -1,0 +1,10 @@
+# Copies the running system onto the disk chosen in Settings (see musicos_agent/installer.py).
+[Unit]
+Description=Install musicos onto another disk
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/usr/lib/musicos/agent
+Environment=MUSICOS_STATE=/var/lib/musicos
+ExecStart=/usr/bin/python3 -m musicos_agent.installer run
+TimeoutStartSec=3h

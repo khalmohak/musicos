@@ -1,0 +1,17 @@
+#!/bin/sh
+# Update over the network from a shell (SSH), without the UI:
+#   sudo musicos-update                      # from the address set in Settings
+#   sudo musicos-update http://host:8090     # from this address
+#   sudo musicos-update --status             # versions, boot entries, last install log
+set -e
+if [ "${1:-}" = "--status" ]; then
+    grep IMAGE_VERSION /usr/lib/os-release
+    bootctl list --no-pager 2>/dev/null | grep -E "title|id:|status" || true
+    tail -5 /var/lib/musicos/update.log 2>/dev/null || true
+    exit 0
+fi
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+export PYTHONPATH=/usr/lib/musicos/agent MUSICOS_STATE=/var/lib/musicos
+python3 -m musicos_agent.updates "$@"
+chown -R music:music /var/lib/musicos/updates /var/lib/musicos/update-status.json 2>/dev/null || true
+echo "restart to use the new version: sudo systemctl reboot"

@@ -10,3 +10,4 @@ image/mkosi.extra/etc/musicos/smb-credentials
 .venv/
 mkosi.version
 mkosi.packages/
+image/local/

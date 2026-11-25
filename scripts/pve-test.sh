@@ -31,7 +31,7 @@ if [ -z "${SKIP_BUILD:-}" ]; then
     step "sync repo -> $BUILD_HOST"
     rsync -az --delete --exclude .git --exclude out --exclude image/mkosi.cache --exclude image/mkosi.packages \
         --exclude ui/node_modules -e "$JUMP" ./ "$BUILD_HOST:musicos/"
-    $JUMP "$BUILD_HOST" 'cd musicos && ./scripts/fetch-spotify.sh' | sed 's/^/spotify package: /'
+    $JUMP "$BUILD_HOST" 'cd musicos && ./scripts/fetch-spotify.sh && ./scripts/build-initrd-pkg.sh' | sed 's/^/spotify package: /'
 
     step "build image (log: $OUT/build.log)"
     start=$(date +%s)

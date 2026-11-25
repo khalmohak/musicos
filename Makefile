@@ -43,10 +43,15 @@ check:
 	bash -n scripts/*.sh
 	python3 -m py_compile scripts/*.py
 	sh -n image/mkosi.postinst.chroot image/mkosi.extra/usr/local/bin/musicos-browser
+	@# the agent must actually start and answer (catches runtime errors py_compile misses)
+	cd agent && ( python3 -m musicos_agent --mock --port 18099 >/tmp/musicos-smoke.log 2>&1 & echo $$! > /tmp/musicos-smoke.pid ); \
+	  ok=; for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.5; curl -fs -m 2 localhost:18099/api/status >/dev/null && ok=1 && break; done; \
+	  kill `cat /tmp/musicos-smoke.pid` 2>/dev/null; [ -n "$$ok" ] || { tail -20 /tmp/musicos-smoke.log; exit 1; }
 	@echo ok
 
 image:
 	./scripts/fetch-spotify.sh
+	./scripts/build-initrd-pkg.sh
 	date +%Y%m%d.%H%M > image/mkosi.version
 	cd image && sudo mkosi -f build
 

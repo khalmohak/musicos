@@ -1,0 +1,5 @@
+[Unit]
+Description=Install musicos onto a disk when the UI asks
+
+[Path]
+PathChanged=/var/lib/musicos/install-request
