@@ -80,6 +80,14 @@ systemctl daemon-reload && systemctl enable --now srv-music.automount
 mpc update
 ```
 
+## Automated test loop (Proxmox)
+
+`make test` (or `./scripts/pve-test.sh`) runs from your workstation: rsync the repo to the
+build VM, build the image, have Proxmox pull it and recreate the test VM, then check through
+the QEMU guest agent that mpd, the agent and the kiosk are up without restart loops, hit the
+API over the LAN, and save a screenshot to `out/test/screen.png`. Copy `.pipeline.env.example`
+to `.pipeline.env` first. `SKIP_BUILD=1` redeploys the last build.
+
 ## Debugging
 
 | Symptom | Check |

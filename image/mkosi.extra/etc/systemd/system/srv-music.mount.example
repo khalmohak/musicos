@@ -8,7 +8,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Mount]
-What=//Homelab.local/8TB/media/music/library
+# IP rather than Homelab.local: the image has no mDNS resolver.
+What=//192.168.1.109/8TB/media/music/library
 Where=/srv/music
 Type=cifs
 Options=ro,credentials=/etc/musicos/smb-credentials,iocharset=utf8,uid=mpd,gid=audio,vers=3.0,_netdev

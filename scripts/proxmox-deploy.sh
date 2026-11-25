@@ -5,7 +5,9 @@
 #
 # Settings (env vars):
 #   PVE_HOST   ssh target of the Proxmox node (required), e.g. root@192.168.1.10
-#   VMID       VM id to use/replace           (default 9100)
+#   BUILD_HOST if set, the node pulls the image from this host (e.g. debian@192.168.1.18,
+#              path ~/musicos/out/musicos.raw) instead of uploading a local out/musicos.raw
+#   VMID       VM id to use/replace           (default 9101)
 #   STORAGE    storage for disks               (default local-lvm)
 #   BRIDGE     network bridge                  (default vmbr0)
 #   MEMORY     MiB                             (default 2048)
@@ -16,7 +18,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 : "${PVE_HOST:?set PVE_HOST, e.g. PVE_HOST=root@pve}"
-VMID="${VMID:-9100}"
+VMID="${VMID:-9101}"
+BUILD_HOST="${BUILD_HOST:-}"
 STORAGE="${STORAGE:-local-lvm}"
 BRIDGE="${BRIDGE:-vmbr0}"
 MEMORY="${MEMORY:-2048}"
@@ -24,7 +27,10 @@ CORES="${CORES:-2}"
 IMAGE="out/musicos.raw"
 REMOTE_IMAGE="/var/tmp/musicos.raw"
 
-[ -f "$IMAGE" ] || { echo "no $IMAGE; run 'make image' first" >&2; exit 1; }
+if [ -z "$BUILD_HOST" ] && [ ! -f "$IMAGE" ]; then
+    echo "no $IMAGE; run 'make image' first (or set BUILD_HOST)" >&2
+    exit 1
+fi
 
 # Refuse to clobber a VM that isn't ours.
 existing="$(ssh "$PVE_HOST" "qm config $VMID 2>/dev/null | sed -n 's/^name: //p'" || true)"
@@ -33,8 +39,14 @@ if [ -n "$existing" ] && [ "$existing" != "musicos" ]; then
     exit 1
 fi
 
-echo ">> copying image to $PVE_HOST:$REMOTE_IMAGE"
-rsync -h --progress --sparse "$IMAGE" "$PVE_HOST:$REMOTE_IMAGE"
+if [ -n "$BUILD_HOST" ]; then
+    echo ">> $PVE_HOST pulling image from $BUILD_HOST"
+    ssh "$PVE_HOST" "rsync -a --sparse -e 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' \
+        '$BUILD_HOST:musicos/out/musicos.raw' '$REMOTE_IMAGE'"
+else
+    echo ">> copying image to $PVE_HOST:$REMOTE_IMAGE"
+    rsync -h --progress --sparse "$IMAGE" "$PVE_HOST:$REMOTE_IMAGE"
+fi
 
 echo ">> (re)creating VM $VMID"
 ssh "$PVE_HOST" bash -s -- "$VMID" "$STORAGE" "$BRIDGE" "$MEMORY" "$CORES" "$REMOTE_IMAGE" <<'EOF'
@@ -49,7 +61,7 @@ qm create "$VMID" --name musicos --ostype l26 --machine q35 --bios ovmf \
     --efidisk0 "$STORAGE:1,efitype=4m,pre-enrolled-keys=0" \
     --scsihw virtio-scsi-single --scsi0 "$STORAGE:0,import-from=$IMG" \
     --boot order=scsi0 \
-    --vga virtio --serial0 socket \
+    --vga virtio --serial0 socket --agent enabled=1 \
     --audio0 device=ich9-intel-hda,driver=spice \
     --net0 "virtio,bridge=$BRIDGE"
 qm start "$VMID"

@@ -2,7 +2,7 @@ PY ?= python3
 PORT ?= 8080
 AGENT = PYTHONPATH=agent $(PY) -m musicos_agent --port $(PORT)
 
-.PHONY: help dev dev-mpd check image vm deploy clean
+.PHONY: help dev dev-mpd check image vm deploy test clean
 
 help:
 	@echo "make dev       UI + agent with a fake library (any machine, no MPD)"
@@ -11,6 +11,7 @@ help:
 	@echo "make image     build out/musicos.raw (Debian trixie build host, needs root)"
 	@echo "make vm        boot the image in QEMU on the build host"
 	@echo "make deploy    push image to Proxmox and recreate the test VM (PVE_HOST=root@pve)"
+	@echo "make test      sync, build on the build VM, deploy, boot-check, screenshot (.pipeline.env)"
 
 dev:
 	$(AGENT) --mock
@@ -36,6 +37,9 @@ vm:
 
 deploy:
 	./scripts/proxmox-deploy.sh
+
+test:
+	./scripts/pve-test.sh
 
 clean:
 	cd image && sudo mkosi clean || true
