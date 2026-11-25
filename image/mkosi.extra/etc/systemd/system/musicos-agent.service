@@ -1,0 +1,16 @@
+[Unit]
+Description=musicos player agent (HTTP API + UI)
+Wants=mpd.service
+After=mpd.service network.target
+
+[Service]
+User=music
+Environment=PYTHONPATH=/opt/musicos/agent
+Environment=MUSICOS_UI=/opt/musicos/ui
+EnvironmentFile=-/etc/musicos/agent.env
+ExecStart=/usr/bin/python3 -m musicos_agent
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

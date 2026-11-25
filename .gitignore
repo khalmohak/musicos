@@ -1,0 +1,8 @@
+out/
+image/mkosi.cache/
+image/mkosi.builddir/
+image/mkosi.output/
+__pycache__/
+*.pyc
+.DS_Store
+image/mkosi.extra/etc/musicos/smb-credentials

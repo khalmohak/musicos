@@ -1,0 +1,19 @@
+#!/bin/sh
+# Runs inside the image after packages and ExtraTrees are installed.
+set -eu
+
+# Kiosk user. DEV ONLY password; replace with SSH keys before real use.
+if ! id music >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash music
+    echo 'music:music' | chpasswd
+fi
+for g in audio video render input sudo; do
+    getent group "$g" >/dev/null && usermod -aG "$g" music
+done
+
+mkdir -p /srv/music
+chmod 755 /srv/music
+chmod 755 /usr/local/bin/musicos-browser
+
+systemctl enable systemd-networkd systemd-resolved ssh mpd musicos-agent musicos-kiosk
+systemctl set-default graphical.target

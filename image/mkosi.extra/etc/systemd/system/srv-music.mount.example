@@ -1,0 +1,15 @@
+# Mount the homelab SMB library at /srv/music.
+# To use: rename to srv-music.mount (and copy srv-music.automount.example), fill in
+# /etc/musicos/smb-credentials (username=..., password=..., chmod 600), then
+#   systemctl enable --now srv-music.automount
+[Unit]
+Description=Music library (SMB)
+After=network-online.target
+Wants=network-online.target
+
+[Mount]
+What=//Homelab.local/8TB/media/music/library
+Where=/srv/music
+Type=cifs
+Options=ro,credentials=/etc/musicos/smb-credentials,iocharset=utf8,uid=mpd,gid=audio,vers=3.0,_netdev
+TimeoutSec=30

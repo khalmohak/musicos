@@ -1,0 +1,19 @@
+#!/bin/sh
+# Launched by cage. Waits for the agent, then opens the UI full-screen.
+URL="${MUSICOS_URL:-http://127.0.0.1:8080/}"
+
+i=0
+until python3 -c "import sys,urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)" "$URL" 2>/dev/null; do
+    i=$((i + 1))
+    [ "$i" -ge 60 ] && break
+    sleep 0.5
+done
+
+if command -v cog >/dev/null 2>&1; then
+    exec cog "$URL"
+elif command -v chromium >/dev/null 2>&1; then
+    exec chromium --kiosk --ozone-platform=wayland --noerrdialogs --disable-infobars \
+        --autoplay-policy=no-user-gesture-required "$URL"
+fi
+echo "no browser installed (cog or chromium)" >&2
+exit 1

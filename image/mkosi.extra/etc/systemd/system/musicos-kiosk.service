@@ -1,0 +1,25 @@
+# Boots straight into the UI: cage (single-app Wayland compositor) on tty1 running the browser.
+[Unit]
+Description=musicos kiosk
+Wants=musicos-agent.service
+After=musicos-agent.service systemd-user-sessions.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=music
+PAMName=login
+TTYPath=/dev/tty1
+UtmpIdentifier=tty1
+UtmpMode=user
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+Environment=XDG_SESSION_TYPE=wayland
+EnvironmentFile=-/etc/musicos/kiosk.env
+ExecStart=/usr/bin/cage -s -- /usr/local/bin/musicos-browser
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target
