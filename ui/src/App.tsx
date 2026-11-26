@@ -15,6 +15,7 @@ import { SearchView } from './screens/SearchView'
 import { Settings } from './screens/Settings'
 import { SourcesView } from './screens/SourcesView'
 import { NewDriveDialog } from './components/NewDriveDialog'
+import { startPerfProbe } from './lib/perf'
 import { Setup } from './screens/Setup'
 
 type Screen =
@@ -30,6 +31,9 @@ type Screen =
 
 type Transport = 'playpause' | 'next' | 'prev' | 'volup' | 'voldown'
 const MIN_BOOT_MS = 1800
+
+/** what Home shows of the album list: how many, and which are greyed out */
+const albumsSig = (l: Album[]) => `${l.length}:${l.reduce((n, a, i) => (a.offline ? n + i + 1 : n), 0)}`
 
 export function App() {
   const [config, setConfig] = useState<Config | null>(null)
@@ -47,6 +51,8 @@ export function App() {
   const lastStatus = useRef('')
   const [power, setPower] = useState(() => new URLSearchParams(location.search).has('power'))
   const screen = stack[stack.length - 1]
+  const stackRef = useRef(stack)
+  stackRef.current = stack
 
   // ---- navigation: a stack, so Back always returns to where you were ----
   const push = useCallback((s: Screen) => setStack((st) => [...st, s]), [])
@@ -66,6 +72,7 @@ export function App() {
         try {
           const [c, a, s] = await Promise.all([api.config(), api.albums(), api.status()])
           setConfig(c)
+          if (c.perfProbe) startPerfProbe(() => stackRef.current[stackRef.current.length - 1]?.kind ?? '')
           setAlbums(a)
           setStatus(s)
           configureSounds({ enabled: c.uiSounds, musicPlaying: s.state === 'play' })
@@ -116,7 +123,8 @@ export function App() {
   useEffect(() => {
     if (screen?.kind !== 'home') return
     const t = setInterval(() => {
-      api.albums().then((a) => setAlbums((old) => (old.length === a.length ? old : a))).catch(() => {})
+      // keep the same array (no re-render) unless something visible changed: count or offline state
+      api.albums().then((a) => setAlbums((old) => (albumsSig(old) === albumsSig(a) ? old : a))).catch(() => {})
       api.artists().then((a) => setArtists((old) => (old.length === a.length ? old : a))).catch(() => {})
     }, 20000)
     return () => clearInterval(t)
@@ -155,6 +163,8 @@ export function App() {
     if (k === 'settings' && screen.kind !== 'settings') return sfx.select(), open({ kind: 'settings' }), true
     if (k === 'search' && screen.kind !== 'search') return sfx.select(), open({ kind: 'search' }), true
     if (k === 'stop') return api.control('stop').then(setStatus).catch(() => {}), true
+    // controller Y, keyboard M, remote Menu/Info: Now Playing from anywhere
+    if (k === 'menu' && screen.kind !== 'playing' && (status?.song || status?.receiver)) return sfx.select(), open({ kind: 'playing' }), true
     if (k === 'power') return sfx.select(), setPower(true), true
     return false
   })

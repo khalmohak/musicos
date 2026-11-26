@@ -63,4 +63,18 @@ fi
 # forever (and with it multi-user.target and boot-complete, so A/B updates would never be
 # marked good). Mask, not disable: mkosi's preset step re-enables disabled units.
 systemctl mask systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service
+# mpd.service is started directly; Debian's mpd.socket also wants port 6600 and raced it at
+# boot ("Address already in use", mpd failed). Socket activation also disables zeroconf.
+systemctl mask mpd.socket
+# TPM PCR policy services fail on every boot here (no usable TPM / not used): they only mark
+# the system degraded
+systemctl mask systemd-pcrlock-firmware-code.service systemd-pcrlock-firmware-config.service \
+    systemd-pcrlock-make-policy.service systemd-pcrlock-secureboot-policy.service \
+    systemd-pcrlock-secureboot-authority.service systemd-pcrlock-file-system.service \
+    systemd-pcrlock-machine-id.service systemd-pcrlock-efi-action.service 2>/dev/null || true
+# smartctl stays for diagnostics; the smartd daemon has nothing to do on a music box
+systemctl disable smartmontools.service 2>/dev/null || true
+# UTF-8 everywhere (pam_env reads /etc/default/locale; without it sessions run in POSIX)
+printf 'LANG=C.UTF-8\n' > /etc/locale.conf
+printf 'LANG=C.UTF-8\n' > /etc/default/locale
 systemctl set-default graphical.target

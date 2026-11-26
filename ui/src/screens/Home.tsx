@@ -1,7 +1,9 @@
 import { Button } from '@glyphui/ui'
 import { FolderPlus, Power, RefreshCw, Search, Settings as SettingsIcon, Unplug, UserRound } from 'lucide-react'
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { type MutableRefObject, type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Cover } from '../components/Cover'
+import { Crossfade } from '../components/Fade'
+import { VirtualWall } from '../components/VirtualWall'
 import { ScanCard, useScan } from '../components/ScanCard'
 import { NowPlayingBar } from '../components/NowPlayingBar'
 import { Record } from '../components/Record'
@@ -11,7 +13,6 @@ import { type Album, type ArtistEntry, type Status, albumKey, api, artistArtUrl,
 import { setAccentFrom } from '../lib/color'
 import { gridMove, stepTo } from '../lib/grid'
 import { useRemote } from '../lib/keys'
-import { reveal } from '../lib/motion'
 import { sfx } from '../lib/sounds'
 
 export type HomeTab = 'albums' | 'artists'
@@ -19,7 +20,8 @@ type Transport = 'playpause' | 'next' | 'prev' | 'volup' | 'voldown'
 
 const ALBUM_COLS = 7
 const ARTIST_COLS = 6
-const HEADER = ['albums', 'artists', 'search', 'settings', 'power'] as const
+const HEADER_BASE = ['albums', 'artists', 'search', 'settings', 'power'] as const
+const HEADER_PLAYING = ['albums', 'artists', 'playing', 'search', 'settings', 'power'] as const
 
 function greeting(name: string) {
   const h = new Date().getHours()
@@ -73,24 +75,34 @@ export function Home({
     return () => clearInterval(t)
   }, [])
   const idx = Math.min(focus[tab], Math.max(0, (tab === 'albums' ? albums.length : artists.length) - 1))
-  const tiles = useRef<(HTMLElement | null)[]>([])
   const clock = useClock()
   const playing = !!status?.song || !!status?.receiver
+  // a Now Playing button joins the top bar while something plays
+  const HEADER: readonly string[] = playing ? HEADER_PLAYING : HEADER_BASE
   const cols = tab === 'albums' ? ALBUM_COLS : ARTIST_COLS
   const count = tab === 'albums' ? albums.length : artists.length
   const album = tab === 'albums' ? albums[idx] : undefined
   const artist = tab === 'artists' ? artists[idx] : undefined
 
-  useLayoutEffect(() => {
-    if (zone === 'grid' && active) reveal(tiles.current[idx], { block: 'center' })
-  }, [idx, zone, tab, active])
 
   useEffect(() => {
     const file = album?.file ?? artist?.file
-    if (file) setAccentFrom(coverUrl(file, 0.05))
+    if (file) setAccentFrom(coverUrl(file, 0.05), 700)
   }, [album, artist])
 
   const setIdx = (i: number) => onFocus(tab, i)
+  // the wall is memoised: it gets its callbacks through a ref so a new function each render
+  // (every second while music plays) doesn't redraw 300+ tiles
+  const wallAct = useRef<WallAct>({ open: onOpenAlbum, openArtist: onOpenArtist, hover: () => {}, wheel: () => {} })
+  wallAct.current = {
+    open: onOpenAlbum,
+    openArtist: onOpenArtist,
+    hover: (i: number) => (setZone('grid'), setIdx(i)),
+    wheel: (rows: number) => {
+      setZone('grid')
+      setIdx(Math.max(0, Math.min(count - 1, idx + rows * cols)))
+    },
+  }
 
   useRemote((k) => {
     if (k === 'playpause' || k === 'next' || k === 'prev' || k === 'volup' || k === 'voldown') {
@@ -111,7 +123,8 @@ export function Home({
         sfx.tick()
       } else if (k === 'ok') {
         sfx.select()
-        if (HEADER[hIdx] === 'search') onSearch()
+        if (HEADER[hIdx] === 'playing') onNowPlaying()
+        else if (HEADER[hIdx] === 'search') onSearch()
         else if (HEADER[hIdx] === 'settings') onSettings()
         else if (HEADER[hIdx] === 'power') onPower()
         else setZone('grid')
@@ -154,7 +167,8 @@ export function Home({
   const headerClick = (i: number) => {
     sfx.select()
     setHIdx(i)
-    if (HEADER[i] === 'search') onSearch()
+    if (HEADER[i] === 'playing') onNowPlaying()
+    else if (HEADER[i] === 'search') onSearch()
     else if (HEADER[i] === 'settings') onSettings()
     else if (HEADER[i] === 'power') onPower()
     else onTab(HEADER[i] as HomeTab)
@@ -209,13 +223,22 @@ export function Home({
               </span>
             )}
             <span className="mr-3 text-[1.05rem] font-medium tabular-nums text-white/70">{clock}</span>
-            {iconBtn(2, Search)}
-            {iconBtn(3, SettingsIcon, updateReady)}
-            {iconBtn(4, Power)}
+            {playing && pill(HEADER.indexOf('playing'), (
+              <>
+                <span className="flex h-[0.9rem] items-end gap-[2px]" aria-hidden>
+                  {[0, 1, 2].map((b) => <span key={b} className={`w-[3px] rounded-full bg-current ${status?.state === 'play' ? 'mo-eq' : ''}`} style={{ height: '100%', animationDelay: `${b * 160}ms` }} />)}
+                </span>
+                <span className="max-w-[16rem] truncate">{status?.song?.title || status?.receiver?.title || 'Now Playing'}</span>
+              </>
+            ), false)}
+            {iconBtn(HEADER.indexOf('search'), Search)}
+            {iconBtn(HEADER.indexOf('settings'), SettingsIcon, updateReady)}
+            {iconBtn(HEADER.indexOf('power'), Power)}
           </div>
         </div>
-        <div key={(album ? albumKey(album) : artist?.artist) ?? ''} className="mo-fade-in mt-[3.2vh] min-w-0">
+        <div className="mt-[3.2vh] min-w-0">
           <div className="eyebrow">{greeting(name)}</div>
+          <Crossfade k={(album ? albumKey(album) : artist?.artist) ?? ''}>
           <h1 className="mt-2.5 truncate text-[2.3rem] leading-tight font-semibold tracking-[-0.025em]">
             {album?.album ?? artist?.artist ?? ''}
           </h1>
@@ -231,60 +254,17 @@ export function Home({
             )}
             {artist && <span>{artist.albums === 1 ? '1 album' : `${artist.albums} albums`}</span>}
           </div>
+          </Crossfade>
         </div>
       </header>
 
-      <div className="no-scrollbar relative flex-1 overflow-y-auto px-[4.5vw] pt-[3.5vh] pb-[18vh]">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         {empty && <PhotoBackdrop index={0} dim={0.62} />}
-        {empty && <EmptyLibrary onSources={onSources} />}
+        {empty && <div className="no-scrollbar h-full overflow-y-auto px-[4.5vw] pt-[3.5vh] pb-[18vh]"><EmptyLibrary onSources={onSources} /></div>}
 
-        {tab === 'albums' && (
-          <div className="grid gap-x-[1.7vw] gap-y-[3.2vh]" style={{ gridTemplateColumns: `repeat(${ALBUM_COLS}, minmax(0, 1fr))` }}>
-            {albums.map((a, i) => (
-              <div
-                key={albumKey(a)}
-                ref={(el) => {
-                  tiles.current[i] = el
-                }}
-                onClick={() => (sfx.select(), onOpenAlbum(a))}
-                onMouseEnter={() => (setZone('grid'), setIdx(i))}
-                className={`lift relative aspect-square rounded-[0.75rem] ${zone === 'grid' && i === idx ? 'is-focused' : ''}`}
-              >
-                <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.12} eager={i < ALBUM_COLS * 3}
-                  className={`size-full rounded-[0.75rem] text-[0.95rem] transition-[opacity,filter] duration-500 ${a.offline ? 'opacity-35 grayscale' : ''}`} />
-                {a.offline && (
-                  <span className="absolute bottom-[0.6rem] left-[0.6rem] flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[0.68rem] font-medium text-white/75">
-                    <Unplug className="size-[0.8rem]" strokeWidth={2} /> Not connected
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {tab === 'albums' && !empty && <AlbumWall albums={albums} idx={idx} focused={zone === 'grid'} act={wallAct} />}
 
-        {tab === 'artists' && (
-          <div className="grid gap-x-[2.6vw] gap-y-[4vh]" style={{ gridTemplateColumns: `repeat(${ARTIST_COLS}, minmax(0, 1fr))` }}>
-            {artists.map((a, i) => {
-              const on = zone === 'grid' && i === idx
-              return (
-                <div
-                  key={a.artist}
-                  ref={(el) => {
-                    tiles.current[i] = el
-                  }}
-                  onClick={() => (sfx.select(), onOpenArtist(a.artist))}
-                  onMouseEnter={() => (setZone('grid'), setIdx(i))}
-                  className="flex flex-col items-center gap-3"
-                >
-                  <div className={`lift relative aspect-square w-full rounded-full ${on ? 'is-focused' : ''}`}>
-                    <ArtistPortrait entry={a} className="size-full rounded-full" eager={i < ARTIST_COLS * 3} />
-                  </div>
-                  <div className={`w-full truncate text-center text-[0.95rem] transition-colors ${on ? 'text-white' : 'text-white/55'}`}>{a.artist}</div>
-                </div>
-              )
-            })}
-          </div>
-        )}
+        {tab === 'artists' && !empty && <ArtistWall artists={artists} idx={idx} focused={zone === 'grid'} act={wallAct} />}
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[24vh] bg-gradient-to-t from-[rgb(9_9_11)] via-[rgb(9_9_11/0.8)] to-transparent" />
@@ -353,3 +333,67 @@ function EmptyLibrary({ onSources }: { onSources: () => void }) {
     </div>
   )
 }
+
+type WallAct = { open: (a: Album) => void; openArtist: (artist: string) => void; hover: (i: number) => void; wheel: (rows: number) => void }
+
+/** The album wall. Memoised on (albums, focus): status updates every second while music plays
+ * and must not re-render it. Only rows near the view exist; moving slides one GPU layer. */
+const AlbumWall = memo(function AlbumWall({ albums, idx, focused, act }: {
+  albums: Album[]
+  idx: number
+  focused: boolean
+  act: MutableRefObject<WallAct>
+}) {
+  return (
+    <VirtualWall
+      count={albums.length} cols={ALBUM_COLS} idx={idx} keyOf={(i) => albumKey(albums[i])}
+      colGapVw={1.7} rowGapVh={3.2} padXVw={4.5} padTopVh={3.5} padBottomVh={18}
+      onWheelRows={(n) => act.current.wheel(n)}
+      renderItem={(i, near) => {
+        const a = albums[i]
+        return (
+          <div
+            onClick={() => (sfx.select(), act.current.open(a))}
+            onMouseEnter={() => act.current.hover(i)}
+            className={`lift relative size-full rounded-[0.75rem] ${focused && i === idx ? 'is-focused' : ''} ${near ? 'lift-near' : ''}`}
+          >
+            <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.12} eager
+              className={`size-full rounded-[0.75rem] text-[0.95rem] ${a.offline ? 'opacity-35 grayscale' : ''}`} />
+            {a.offline && (
+              <span className="absolute bottom-[0.6rem] left-[0.6rem] flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[0.68rem] font-medium text-white/75">
+                <Unplug className="size-[0.8rem]" strokeWidth={2} /> Not connected
+              </span>
+            )}
+          </div>
+        )
+      }}
+    />
+  )
+})
+
+const ArtistWall = memo(function ArtistWall({ artists, idx, focused, act }: {
+  artists: ArtistEntry[]
+  idx: number
+  focused: boolean
+  act: MutableRefObject<WallAct>
+}) {
+  return (
+    <VirtualWall
+      count={artists.length} cols={ARTIST_COLS} idx={idx} keyOf={(i) => artists[i].artist}
+      colGapVw={2.6} rowGapVh={4} padXVw={4.5} padTopVh={3.5} padBottomVh={18} extraRem={2.3}
+      onWheelRows={(n) => act.current.wheel(n)}
+      renderItem={(i, near) => {
+        const a = artists[i]
+        const on = focused && i === idx
+        return (
+          <div onClick={() => (sfx.select(), act.current.openArtist(a.artist))} onMouseEnter={() => act.current.hover(i)} className="flex flex-col items-center gap-3">
+            <div className={`lift relative aspect-square w-full rounded-full ${on ? 'is-focused' : ''} ${near ? 'lift-near' : ''}`}>
+              <ArtistPortrait entry={a} className="size-full rounded-full" eager />
+            </div>
+            <div className={`w-full truncate text-center text-[0.95rem] transition-colors ${on ? 'text-white' : 'text-white/55'}`}>{a.artist}</div>
+          </div>
+        )
+      }}
+    />
+  )
+})

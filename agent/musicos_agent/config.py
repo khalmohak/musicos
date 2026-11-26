@@ -29,6 +29,7 @@ DEFAULTS = {
     "spotify": True,
     "airplay": True,
     "receiverName": "musicos",
+    "perfProbe": False,  # diagnostics: the UI posts frame-time summaries to /api/perf
 }
 EDITABLE = set(DEFAULTS)
 

@@ -287,3 +287,31 @@ body.mo-pointer button {
   100% { transform: translateX(320%); }
 }
 .mo-indeterminate { animation: mo-indeterminate 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+
+/* FadeImage: a decoded picture fading in over the previous one (never blank in between) */
+@keyframes mo-layer-in {
+  from { opacity: 0; }
+}
+.mo-layer-in { animation: mo-layer-in 520ms ease both; }
+/* Crossfade: text handing over to the next text */
+@keyframes mo-text-in {
+  from { opacity: 0; }
+}
+@keyframes mo-text-out {
+  to { opacity: 0; }
+}
+.mo-text-in { animation: mo-text-in 240ms ease-out both; }
+.mo-text-out { animation: mo-text-out 200ms ease-in both; }
+/* album tiles within a row of the focus already have their GPU layer, so landing on one
+   doesn't create (and flash) a new layer */
+.lift-near { will-change: transform; }
+/* the focus shadow gets its own layer too: fading a big blurred shadow that is painted into
+   the tile repaints the whole tile on every frame */
+.lift-near::after { will-change: opacity; }
+
+/* Now Playing pill: three bars bouncing while music plays (transform only, cheap) */
+@keyframes mo-eq {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+.mo-eq { transform-origin: bottom; animation: mo-eq 900ms ease-in-out infinite; }

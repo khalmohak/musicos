@@ -33,6 +33,9 @@ if [ -z "${SKIP_BUILD:-}" ]; then
         --exclude ui/node_modules -e "$JUMP" ./ "$BUILD_HOST:musicos/"
     $JUMP "$BUILD_HOST" 'cd musicos && ./scripts/fetch-spotify.sh && ./scripts/build-initrd-pkg.sh' | sed 's/^/spotify package: /'
 
+    # each build leaves ~2.5 GB in out/: keep the 3 newest versions (the 40 GB disk filled up)
+    $JUMP "$BUILD_HOST" 'cd musicos/out 2>/dev/null && for v in $(ls -d musicos_2026* 2>/dev/null | sed -E "s/^musicos_([0-9]+\.[0-9]+).*/\1/" | sort -u | head -n -3); do sudo rm -rf musicos_$v musicos_$v.*; done; true'
+
     step "build image (log: $OUT/build.log)"
     start=$(date +%s)
     if ! $JUMP "$BUILD_HOST" 'cd musicos/image && sudo mkosi -f build' >"$OUT/build.log" 2>&1; then

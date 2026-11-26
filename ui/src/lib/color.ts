@@ -58,11 +58,11 @@ export async function coverAccent(url: string): Promise<string | null> {
 
 let pending = 0
 /** Set the global accent (debounced so fast scrolling doesn't thrash). */
-export function setAccentFrom(url: string | null) {
+export function setAccentFrom(url: string | null, delay = 120) {
   const id = ++pending
   window.setTimeout(async () => {
     if (id !== pending || !url) return
     const c = await coverAccent(url)
     if (id === pending && c) document.documentElement.style.setProperty('--mo-accent', c)
-  }, 120)
+  }, delay)
 }

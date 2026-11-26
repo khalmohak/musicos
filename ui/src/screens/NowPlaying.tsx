@@ -6,6 +6,7 @@ import { Record } from '../components/Record'
 import { FormatBadges } from '../components/ui'
 import { type Lyrics, type Status, api, backdropUrl, coverUrl, fmtTime } from '../lib/api'
 import { setAccentFrom } from '../lib/color'
+import { Crossfade, FadeImage } from '../components/Fade'
 import { useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 
@@ -83,6 +84,8 @@ export function NowPlaying({
   onQueue: () => void
 }) {
   const song = status?.song
+  /** the album folder: cover, backdrop and accent only change when this does */
+  const albumDir = song ? song.file.slice(0, song.file.lastIndexOf('/')) : ''
   const [zone, setZone] = useState<'scrub' | 'controls'>('controls')
   const [focus, setFocus] = useState(1)
   const [pressed, setPressed] = useState<string | null>(null)
@@ -94,8 +97,10 @@ export function NowPlaying({
   const shown = target ?? elapsed
 
   useEffect(() => {
+    if (song) setAccentFrom(coverUrl(song.file, 0.05))
+  }, [albumDir])
+  useEffect(() => {
     if (!song) return
-    setAccentFrom(coverUrl(song.file, 0.05))
     setLyrics(null)
     api.lyrics(song.file).then((l) => setLyrics(l.lines.length ? l : null)).catch(() => {})
   }, [song?.file])
@@ -177,7 +182,8 @@ export function NowPlaying({
 
   return (
     <div className="tv relative h-full overflow-hidden">
-      <img key={song.file} src={backdropUrl(song.file)} alt="" className="mo-backdrop mo-fade-in opacity-70" />
+      {/* keyed by album folder: changing tracks within an album leaves cover and backdrop alone */}
+      <FadeImage src={backdropUrl(song.file)} group={albumDir} className="absolute inset-0 overflow-hidden opacity-70" imgClassName="mo-backdrop" />
       <div className="absolute inset-0 bg-[rgb(9_9_11/0.58)]" />
 
       <div className="relative flex h-full items-center gap-[4vw] px-[7vw]">
@@ -188,13 +194,14 @@ export function NowPlaying({
           >
             <Record size="100%" accent />
           </div>
-          <div key={song.file} className="mo-xfade relative">
-            <Cover file={song.file} title={song.album} artist={song.artist} fraction={0.36} eager className="aspect-square w-full rounded-[0.6rem] shadow-[0_2.5rem_5rem_-1rem_rgb(0_0_0/0.85)]" />
-          </div>
+          <FadeImage src={coverUrl(song.file, 0.36)} group={albumDir}
+            className="relative aspect-square w-full overflow-hidden rounded-[0.6rem] bg-[rgb(28_28_32)] shadow-[0_2.5rem_5rem_-1rem_rgb(0_0_0/0.85)]"
+            imgClassName="absolute inset-0 size-full object-cover"
+            fallback={<Cover title={song.album} artist={song.artist} className="absolute inset-0 size-full" />} />
         </div>
 
         <div className="flex h-[78vh] min-w-0 flex-1 flex-col justify-center pl-[8vw]">
-          <div key={song.file} className="mo-xfade">
+          <Crossfade k={song.file}>
             {lyricsOn ? (
               <>
                 <div className="truncate text-[1.05rem] font-semibold">{song.title}</div>
@@ -208,7 +215,7 @@ export function NowPlaying({
                 <div className="mt-1 text-[1rem] text-white/45">{song.album}</div>
               </>
             )}
-          </div>
+          </Crossfade>
           {lyricsOn && <LyricsPanel lyrics={lyrics} elapsed={elapsed} />}
 
           {/* scrubber: Up to focus, then left/right */}

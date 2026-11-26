@@ -2,6 +2,7 @@ import { Airplay, Radio, Smartphone } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { type Receiver, fmtTime } from '../lib/api'
 import { setAccentFrom } from '../lib/color'
+import { Crossfade, FadeImage } from './Fade'
 import { PhotoBackdrop } from './PhotoBackdrop'
 import { Record } from './Record'
 
@@ -51,7 +52,7 @@ export function ReceiverNowPlaying({ r }: { r: Receiver }) {
     <div className="tv relative h-full overflow-hidden">
       {/* backdrop: the cover pre-blurred by the agent (cheap to draw), else a photograph */}
       {hasCover ? (
-        <img key={r.cover} src={`${r.cover}${r.cover.includes('?') ? '&' : '?'}blur=1`} alt="" className="mo-backdrop mo-fade-in opacity-70" />
+        <FadeImage src={`${r.cover}${r.cover.includes('?') ? '&' : '?'}blur=1`} className="absolute inset-0 overflow-hidden opacity-70" imgClassName="mo-backdrop" />
       ) : (
         <PhotoBackdrop index={2} dim={0.6} />
       )}
@@ -65,20 +66,15 @@ export function ReceiverNowPlaying({ r }: { r: Receiver }) {
           >
             <Record size="100%" accent />
           </div>
-          <div key={r.cover || trackKey} className="mo-xfade relative">
-            {hasCover ? (
-              <img
-                src={r.cover}
-                alt=""
-                onError={() => setCoverOk(false)}
-                className="aspect-square w-full rounded-[0.6rem] object-cover shadow-[0_2.5rem_5rem_-1rem_rgb(0_0_0/0.85)]"
-              />
-            ) : (
-              <div className="flex aspect-square w-full items-center justify-center rounded-[0.6rem] bg-[rgb(28_28_32)] shadow-[0_2.5rem_5rem_-1rem_rgb(0_0_0/0.85)]">
-                <ReceiverIcon r={r} className="size-1/4 text-white/30" />
-              </div>
-            )}
-          </div>
+          <FadeImage src={hasCover ? r.cover : undefined}
+            className="relative aspect-square w-full overflow-hidden rounded-[0.6rem] bg-[rgb(28_28_32)] shadow-[0_2.5rem_5rem_-1rem_rgb(0_0_0/0.85)]"
+            imgClassName="absolute inset-0 size-full object-cover"
+            fallback={<div className="absolute inset-0 flex items-center justify-center"><ReceiverIcon r={r} className="size-1/4 text-white/30" /></div>} />
+          {!hasCover && (
+            <div className="absolute inset-0 flex items-center justify-center rounded-[0.6rem] bg-[rgb(28_28_32)]">
+              <ReceiverIcon r={r} className="size-1/4 text-white/30" />
+            </div>
+          )}
         </div>
 
         <div className="min-w-0 flex-1 pl-[8vw]">
@@ -86,13 +82,13 @@ export function ReceiverNowPlaying({ r }: { r: Receiver }) {
             <ReceiverIcon r={r} className="size-[1rem]" />
             {receiverLabel(r)}
           </span>
-          <div key={trackKey} className="mo-xfade">
+          <Crossfade k={trackKey}>
             <h1 className="mt-5 line-clamp-2 text-[2.9rem] leading-[1.05] font-semibold tracking-[-0.025em]">
               {r.title || (playing ? 'Playing' : 'Connected')}
             </h1>
             {r.artist && <div className="mt-3 text-[1.3rem] text-white/80">{r.artist}</div>}
             {r.album && <div className="mt-1 text-[1rem] text-white/45">{r.album}</div>}
-          </div>
+          </Crossfade>
 
           {r.duration > 0 && (
             <div className="mt-10 max-w-[36rem]">

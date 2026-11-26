@@ -421,15 +421,20 @@ def make_handler(client, ui_dir, covers, port):
                 if p == "/api/lyrics":
                     return self._send(200, lyrics_for(covers.root, q.get("file", "")) or {"synced": False, "lines": []})
                 if p == "/api/artist-index":
-                    groups = {}
-                    for a in client.all_albums():
-                        g = groups.setdefault(a["artist"], {"artist": a["artist"], "albums": 0, "file": a["file"]})
-                        g["albums"] += 1
-                    out = []
-                    for g in sorted(groups.values(), key=lambda g: g["artist"].casefold()):
-                        g["photo"] = bool(artist_image(covers.root, g["file"], g["artist"], "photo"))
-                        out.append(g)
-                    return self._send(200, out)
+                    albums = client.all_albums()
+                    # one photo lookup per artist means a file system walk per artist (slow on a
+                    # network share): reuse the result until the album list itself changes
+                    if ARTIST_INDEX.get("albums") is not albums:
+                        groups = {}
+                        for a in albums:
+                            g = groups.setdefault(a["artist"], {"artist": a["artist"], "albums": 0, "file": a["file"]})
+                            g["albums"] += 1
+                        out = []
+                        for g in sorted(groups.values(), key=lambda g: g["artist"].casefold()):
+                            g["photo"] = bool(artist_image(covers.root, g["file"], g["artist"], "photo"))
+                            out.append(g)
+                        ARTIST_INDEX.update(albums=albums, out=out)
+                    return self._send(200, ARTIST_INDEX["out"])
                 if p == "/api/artist":
                     name = q.get("name", "")
                     albums = [a for a in client.all_albums() if a["artist"] == name]
@@ -588,6 +593,8 @@ def make_handler(client, ui_dir, covers, port):
                 elif p == "/api/update/discard":
                     updates.discard()
                     return self._send(200, {"ok": True})
+                elif p == "/api/perf":  # frame-time summary from the UI (logged with the request)
+                    return self._send(200, {"ok": True})
                 elif p == "/api/activity":
                     ACTIVITY["at"], ACTIVITY["slept"] = _time.time(), False
                     return self._send(200, {"ok": True})
@@ -674,6 +681,7 @@ def watch_sources(client, root):
     threading.Thread(target=loop, daemon=True).start()
 
 
+ARTIST_INDEX = {}  # {"albums": the album list it was built from, "out": the index}
 LIBRARY_MODE = False  # MPD backend: the library is a set of chosen folders (library.py)
 
 

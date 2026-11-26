@@ -166,6 +166,7 @@ export interface ArtistInfo {
 }
 export interface Config {
   setupComplete: boolean
+  perfProbe?: boolean
   name: string
   uiSounds: boolean
   audioDevice: string
