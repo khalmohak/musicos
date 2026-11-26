@@ -49,29 +49,14 @@ body {
 .lift {
   transition: transform 320ms var(--mo-spring);
 }
-/* a GPU layer only for the focused tile, not one per tile (300+ full-size layers is too much
-   for integrated graphics and made the album wall stutter) */
-.lift.is-focused {
-  will-change: transform;
-}
-.lift::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  box-shadow: 0 1.8rem 3.2rem -1rem rgb(0 0 0 / 0.85);
-  opacity: 0;
-  transition: opacity 260ms var(--mo-ease);
-  pointer-events: none;
-}
+
+/* no per-tile blurred shadow: fading a large blur shadow in and out on every focus move was
+   among the most expensive things to paint on integrated graphics (measured on the box).
+   The scale-up is the focus cue; the album wall adds one shared shadow (VirtualWall). */
 .lift.is-focused,
 .lift:focus-visible {
   transform: scale(1.08);
   z-index: 2;
-}
-.lift.is-focused::after,
-.lift:focus-visible::after {
-  opacity: 1;
 }
 
 /* capsule buttons (Glyph Button underneath) */
@@ -304,10 +289,10 @@ body.mo-pointer button {
 .mo-text-out { animation: mo-text-out 200ms ease-in both; }
 /* album tiles within a row of the focus already have their GPU layer, so landing on one
    doesn't create (and flash) a new layer */
-/* wall tiles: only ~40 exist at a time (VirtualWall), so each keeps its GPU layer for good;
-   focus then only changes a transform. No per-tile shadow: the wall has one shared shadow. */
+/* wall tiles keep a GPU layer for as long as they are rendered (only ~40 exist at a time,
+   VirtualWall). Measured on the box: without it, the focused tile gets a layer created (and
+   drawn) at the moment its scale animation starts, a 65-70 ms stall on each move. */
 .wall-tile { will-change: transform; }
-.lift-flat::after { display: none; }
 
 /* Now Playing pill: three bars bouncing while music plays (transform only, cheap) */
 @keyframes mo-eq {

@@ -2,7 +2,6 @@ import { Button } from '@glyphui/ui'
 import { FolderPlus, Power, RefreshCw, Search, Settings as SettingsIcon, Unplug, UserRound } from 'lucide-react'
 import { type MutableRefObject, type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Cover } from '../components/Cover'
-import { Crossfade } from '../components/Fade'
 import { VirtualWall } from '../components/VirtualWall'
 import { ScanCard, useScan } from '../components/ScanCard'
 import { NowPlayingBar } from '../components/NowPlayingBar'
@@ -39,7 +38,7 @@ function useClock() {
 }
 
 export function Home({
-  albums, artists, status, name, tab, focus, onTab, onFocus, onOpenAlbum, onOpenArtist, onNowPlaying, onSearch,
+  albums, artists, status, name, tab, onTab, onOpenAlbum, onOpenArtist, onNowPlaying, onSearch,
   onSettings, onSources, onPower, onTransport, active = true,
 }: {
   albums: Album[]
@@ -47,10 +46,7 @@ export function Home({
   status: Status | null
   name: string
   tab: HomeTab
-  /** remembered focus per tab, so Back returns to the same cover */
-  focus: { albums: number; artists: number }
   onTab: (t: HomeTab) => void
-  onFocus: (t: HomeTab, i: number) => void
   onOpenAlbum: (a: Album) => void
   onOpenArtist: (artist: string) => void
   onNowPlaying: () => void
@@ -73,6 +69,9 @@ export function Home({
     const t = setInterval(poll, 5 * 60_000)
     return () => clearInterval(t)
   }, [])
+  // focus per tab lives here, not in App: Home stays mounted under other screens (so it is
+  // remembered), and an arrow press then re-renders Home only, not the whole app
+  const [focus, setFocus] = useState({ albums: 0, artists: 0 })
   const idx = Math.min(focus[tab], Math.max(0, (tab === 'albums' ? albums.length : artists.length) - 1))
   const clock = useClock()
   const playing = !!status?.song || !!status?.receiver
@@ -89,7 +88,7 @@ export function Home({
     void file // Home keeps a fixed glow: re-colouring it repainted the whole screen after each move
   }, [album, artist])
 
-  const setIdx = (i: number) => onFocus(tab, i)
+  const setIdx = (i: number) => setFocus((f) => (f[tab] === i ? f : { ...f, [tab]: i }))
   // the wall is memoised: it gets its callbacks through a ref so a new function each render
   // (every second while music plays) doesn't redraw 300+ tiles
   const wallAct = useRef<WallAct>({ open: onOpenAlbum, openArtist: onOpenArtist, hover: () => {}, wheel: () => {} })
@@ -237,7 +236,7 @@ export function Home({
         </div>
         <div className="mt-[3.2vh] min-w-0">
           <div className="eyebrow">{greeting(name)}</div>
-          <Crossfade k={(album ? albumKey(album) : artist?.artist) ?? ''}>
+          <div>
           <h1 className="mt-2.5 truncate text-[2.3rem] leading-tight font-semibold tracking-[-0.025em]">
             {album?.album ?? artist?.artist ?? ''}
           </h1>
@@ -253,7 +252,7 @@ export function Home({
             )}
             {artist && <span>{artist.albums === 1 ? '1 album' : `${artist.albums} albums`}</span>}
           </div>
-          </Crossfade>
+          </div>
         </div>
       </header>
 

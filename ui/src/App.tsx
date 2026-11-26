@@ -44,7 +44,6 @@ export function App() {
   const [stack, setStack] = useState<Screen[]>([])
   const [boot, setBoot] = useState<'on' | 'leaving' | 'off'>('on')
   const [homeTab, setHomeTab] = useState<HomeTab>('albums')
-  const [homeFocus, setHomeFocus] = useState({ albums: 0, artists: 0 })
   const [idle, setIdle] = useState(() => new URLSearchParams(location.search).has('saver'))
   const lastInput = useRef(Date.now())
   const lastBeat = useRef(0)
@@ -250,9 +249,7 @@ export function App() {
           status={status}
           name={config.name}
           tab={homeTab}
-          focus={homeFocus}
           onTab={setHomeTab}
-          onFocus={(t, i) => setHomeFocus((f) => ({ ...f, [t]: i }))}
           onOpenAlbum={openAlbum}
           onOpenArtist={openArtist}
           onNowPlaying={() => open({ kind: 'playing' })}
