@@ -403,10 +403,14 @@ def make_handler(client, ui_dir, covers, port):
                     return self._send(200, albums)
                 if p == "/api/library":
                     return self._send(200, library.overview(client if LIBRARY_MODE else None))
-                if p == "/api/info/album":
+                if p in ("/api/info/album", "/api/info/track"):
                     artist_, album_ = q.get("artist", ""), q.get("album", "")
                     tracks = [t.get("title", "") for t in client.tracks(artist_, album_)] if artist_ and album_ else []
-                    year = next((a.get("year", "") for a in client.all_albums() if a["artist"] == artist_ and a["album"] == album_), "")
+                    all_ = client.all_albums()
+                    year = next((a.get("year", "") for a in all_ if a["artist"] == artist_ and a["album"] == album_), "")
+                    albuminfo.LIBRARY_ARTISTS = sorted({a["artist"] for a in all_})
+                    if p == "/api/info/track":
+                        return self._send(200, albuminfo.track(artist_, album_, q.get("title", ""), year, tracks))
                     d = albuminfo.album(artist_, album_, year, tracks)
                     if d.get("discography"):  # mark what's already in the library
                         have = {(a["artist"].casefold(), albuminfo._norm(a["album"])) for a in client.all_albums()}

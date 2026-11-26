@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { type AlbumInfo, type ArtistNotes, api } from './api'
+import { type AlbumInfo, type ArtistNotes, type TrackCard, api } from './api'
 
 const albums = new Map<string, AlbumInfo>()
 const artists = new Map<string, ArtistNotes>()
+const cards = new Map<string, TrackCard>()
 
 /** Album notes: cached in memory; while the box is still preparing them, ask again every 4 s. */
 export function useAlbumInfo(artist?: string, album?: string) {
@@ -56,6 +57,43 @@ export function useArtistInfo(name?: string) {
     }
   }, [name])
   return info
+}
+
+/** The playing song's card. Asking for it also queues the rest of its album (on the box). */
+export function useTrackCard(artist?: string, album?: string, title?: string) {
+  const key = artist && album && title ? `${artist}\u0000${album}\u0000${title}` : ''
+  const [card, setCard] = useState<TrackCard | null>(() => (key ? cards.get(key) ?? null : null))
+  useEffect(() => {
+    if (!key || !artist || !album || !title) return setCard(null)
+    const cached = cards.get(key)
+    setCard(cached ?? null)
+    if (cached && cached.status !== 'pending') return
+    let alive = true
+    let tries = 0
+    let t = 0
+    const load = () =>
+      api.trackCard(artist, album, title).then((d) => {
+        if (!alive) return
+        if (d.status !== 'pending') cards.set(key, d)
+        setCard(d)
+        if (d.status === 'pending' && tries++ < 60) t = window.setTimeout(load, 3000)
+      }).catch(() => {})
+    load()
+    return () => {
+      alive = false
+      clearTimeout(t)
+    }
+  }, [key])
+  return card
+}
+
+/** What the facts line under the title cycles through: things to listen for, then the moment. */
+export function cardLines(card: TrackCard | null): { label: string; text: string }[] {
+  if (!card || card.status !== 'ready') return []
+  return [
+    ...(card.listenFor ?? []).map((text) => ({ label: 'Listen for', text })),
+    ...(card.moment ? [{ label: 'The moment', text: card.moment }] : []),
+  ]
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()

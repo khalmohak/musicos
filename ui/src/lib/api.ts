@@ -247,9 +247,24 @@ export interface InfoFact {
   track: string | null
   source: string
 }
+export interface TrackCard {
+  status: 'ready' | 'pending' | 'none' | 'off'
+  song?: string
+  listenFor?: string[]
+  players?: { name: string; plays: string }[]
+  moment?: string
+  sources?: { id: string; name: string; url: string }[]
+}
+export interface Connection {
+  name: string
+  role: string
+  bands: { name: string; years: string; have: boolean; libraryName: string }[]
+}
 export interface AlbumInfo {
   status: 'ready' | 'pending' | 'none' | 'off'
   summary?: string
+  stories?: { text: string; about: string }[]
+  connections?: Connection[]
   recording?: string | null
   facts?: InfoFact[]
   date?: string
@@ -263,7 +278,7 @@ export interface AlbumInfo {
 export interface ArtistNotes {
   status: 'ready' | 'pending' | 'none' | 'off'
   bio?: string
-  facts?: InfoFact[]
+  stories?: { text: string; about: string }[]
   members?: { name: string; years: string; role: string }[]
   sources?: { id: string; name: string; url: string }[]
 }
@@ -408,6 +423,7 @@ export const api = {
   removeSource: (id: string) => req<{ ok: boolean }>('/api/sources/remove', { id }),
   library: () => req<LibraryOverview>('/api/library'),
   albumInfo: (artist: string, album: string) => req<AlbumInfo>(`/api/info/album?artist=${q(artist)}&album=${q(album)}`),
+  trackCard: (artist: string, album: string, title: string) => req<TrackCard>(`/api/info/track?artist=${q(artist)}&album=${q(album)}&title=${q(title)}`),
   artistInfo: (name: string) => req<ArtistNotes>(`/api/info/artist?name=${q(name)}`),
   libraryBrowse: (source: string, path = '') => req<BrowseResult>(`/api/library/browse?source=${q(source)}&path=${q(path)}`),
   libraryAdd: (source: string, path: string) => req<LibraryFolder>('/api/library/add', { source, path }),

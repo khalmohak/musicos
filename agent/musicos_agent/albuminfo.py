@@ -27,7 +27,7 @@ import urllib.request
 from . import config
 
 UA = "musicos/0.3 (self-hosted music player)"
-MODEL_DEFAULT = "gpt-5.4-mini"
+MODEL_DEFAULT = "gpt-5.4"  # follows "leave it empty" reliably; the mini model padded
 RETRY_AFTER = 7 * 86400  # albums with no sources are looked up again after a week
 _last_call = {}
 _rate_lock = threading.Lock()
@@ -80,7 +80,8 @@ def _get(url, host_delay=0.0, headers=None, data=None, timeout=20):
             # MusicBrainz / Discogs answer 503 / 429 when busy: wait and try again
             if e.code not in (429, 503) or attempt == 3:
                 raise
-            time.sleep(2 + attempt * 3)
+            retry = e.headers.get("Retry-After") if e.headers else None
+            time.sleep(float(retry) if retry and retry.isdigit() else 3 + attempt * 6)
 
 
 def _mb(path, **params):
@@ -132,7 +133,7 @@ def mb_release_group(artist, album):
 def mb_details(rg, track_count):
     """Release-group links, the edition closest to the library's, its per-track credits."""
     out = {"mbid": rg["id"], "date": rg.get("first-release-date", ""), "links": {}, "credits": {}, "album_credits": [],
-           "label": "", "recorded": [], "artist_id": "", "tracks": []}
+           "label": "", "recorded": [], "artist_id": "", "tracks": [], "works": {}}
     full = _mb("release-group/%s" % rg["id"], inc="url-rels+artist-credits")
     for rel in full.get("relations", []):
         url = rel.get("url", {}).get("resource", "")
@@ -149,11 +150,11 @@ def mb_details(rg, track_count):
     if not rels:
         return out
     rel = sorted(rels, key=rank)[0]
-    r = _mb("release/%s" % rel["id"], inc="recordings+artist-credits+labels+recording-level-rels+artist-rels+place-rels+release-rels")
+    r = _mb("release/%s" % rel["id"], inc="recordings+artist-credits+labels+recording-level-rels+artist-rels+place-rels+release-rels+work-rels")
     out["label"] = ", ".join(sorted({li.get("label", {}).get("name", "") for li in r.get("label-info", []) if li.get("label")}))
     for rel_ in r.get("relations", []):
         if rel_.get("target-type") == "artist" and rel_.get("type") not in _NOT_MUSIC:
-            out["album_credits"].append({"name": rel_["artist"]["name"], "role": _role(rel_)})
+            out["album_credits"].append({"name": rel_["artist"]["name"], "role": _role(rel_), "id": rel_["artist"].get("id", "")})
     for medium in r.get("media", []):
         for t in medium.get("tracks", []):
             rec = t.get("recording", {})
@@ -162,7 +163,9 @@ def mb_details(rg, track_count):
             people = []
             for rel_ in rec.get("relations", []):
                 if rel_.get("target-type") == "artist" and rel_.get("type") not in _NOT_MUSIC:
-                    people.append({"name": rel_["artist"]["name"], "role": _role(rel_)})
+                    people.append({"name": rel_["artist"]["name"], "role": _role(rel_), "id": rel_["artist"].get("id", "")})
+                elif rel_.get("target-type") == "work" and rel_.get("type") == "performance":
+                    out["works"].setdefault(title, rel_.get("work", {}).get("id", ""))
                 elif rel_.get("target-type") == "place":
                     place = rel_.get("place", {}).get("name", "")
                     if place:
@@ -228,12 +231,13 @@ def _recorded(entries):
 
 
 def _merge_people(people):
-    merged = {}
+    merged, ids = {}, {}
     for p in people:
         merged.setdefault(p["name"], [])
+        ids.setdefault(p["name"], p.get("id", ""))
         if p["role"] and p["role"] not in merged[p["name"]]:
             merged[p["name"]].append(p["role"])
-    return [{"name": n, "role": ", ".join(r)} for n, r in merged.items()]
+    return [{"name": n, "role": ", ".join(r), "id": ids[n]} for n, r in merged.items()]
 
 
 def mb_discography(artist_id):
@@ -255,20 +259,20 @@ def wikipedia_text(wikidata_url=None, search=None):
     if wikidata_url:
         qid = wikidata_url.rstrip("/").rsplit("/", 1)[-1]
         try:
-            ent = _get("https://www.wikidata.org/wiki/Special:EntityData/%s.json" % qid, 0.2)
+            ent = _get("https://www.wikidata.org/wiki/Special:EntityData/%s.json" % qid, 1.0)
             title = ent["entities"][qid].get("sitelinks", {}).get("enwiki", {}).get("title")
         except Exception:
             title = None
     if not title and search:
         res = _get("https://en.wikipedia.org/w/api.php?" + urllib.parse.urlencode(
-            {"action": "query", "list": "search", "srsearch": search, "srlimit": 3, "format": "json"}), 0.2)
+            {"action": "query", "list": "search", "srsearch": search, "srlimit": 3, "format": "json"}), 1.0)
         hits = res.get("query", {}).get("search", [])
         if hits:
             title = hits[0]["title"]
     if not title:
         return None, None
     res = _get("https://en.wikipedia.org/w/api.php?" + urllib.parse.urlencode(
-        {"action": "query", "prop": "extracts", "explaintext": 1, "titles": title, "format": "json", "redirects": 1}), 0.2)
+        {"action": "query", "prop": "extracts", "explaintext": 1, "titles": title, "format": "json", "redirects": 1}), 1.0)
     pages = res.get("query", {}).get("pages", {})
     text = next(iter(pages.values()), {}).get("extract", "") if pages else ""
     # credits and track lists come from MusicBrainz; keep the prose
@@ -300,37 +304,144 @@ def lastfm(method, **params):
     return _get("https://ws.audioscrobbler.com/2.0/?" + urllib.parse.urlencode(params), 0.25)
 
 
-# ---- the writer ---------------------------------------------------------------------------
-SYSTEM = """You write liner notes for a music player on a TV.
-Use ONLY the numbered sources you are given. Never add anything from your own knowledge, even
-if you are sure: no dates, names, places or claims that are not in the sources.
-Every fact cites the id of the source it comes from. Prefer MusicBrainz for dates and credits,
-Wikipedia for history and background. Write plainly and precisely, no hype, no adjectives
-like "iconic" or "legendary". Short sentences. If the sources are thin, write less."""
+# ---- articles -----------------------------------------------------------------------------
+def wiki_article(title):
+    """Full plain text of an English Wikipedia article (redirects followed)."""
+    res = _get("https://en.wikipedia.org/w/api.php?" + urllib.parse.urlencode(
+        {"action": "query", "prop": "extracts", "explaintext": 1, "titles": title, "format": "json", "redirects": 1}), 1.0)
+    page = next(iter(res.get("query", {}).get("pages", {}).values()), {})
+    if "missing" in page:
+        return None, ""
+    return page.get("title", title), page.get("extract", "")
 
-ALBUM_TASK = """Album: {album} by {artist}{year}.
-Tracks: {tracks}
 
+def wiki_title_from_wikidata(url):
+    if not url:
+        return None
+    qid = url.rstrip("/").rsplit("/", 1)[-1]
+    try:
+        ent = _get("https://www.wikidata.org/wiki/Special:EntityData/%s.json" % qid, 1.0)
+        return ent["entities"][qid].get("sitelinks", {}).get("enwiki", {}).get("title")
+    except Exception:
+        return None
+
+
+def wiki_search_title(query, must=()):
+    res = _get("https://en.wikipedia.org/w/api.php?" + urllib.parse.urlencode(
+        {"action": "query", "list": "search", "srsearch": query, "srlimit": 3, "format": "json"}), 1.0)
+    for h in res.get("query", {}).get("search", []):
+        if all(_norm(m) in _norm(h["title"]) for m in must):
+            return h["title"]
+    return None
+
+
+def mb_wiki(kind, mbid):
+    """Wikipedia title for a MusicBrainz artist / work / release group, via its Wikidata link."""
+    if not mbid:
+        return None
+    try:
+        d = _mb("%s/%s" % (kind, mbid), inc="url-rels")
+    except Exception:
+        return None
+    for rel in d.get("relations", []):
+        if rel.get("type") == "wikidata":
+            return wiki_title_from_wikidata(rel["url"]["resource"])
+    return None
+
+
+def around_year(text, year, span=1):
+    """Paragraphs of a long biography that mention the recording year or one either side."""
+    if not year or not year.isdigit():
+        return ""
+    years = {str(int(year) + d) for d in range(-span, span + 1)}
+    paras = [p for p in text.split("\n") if len(p) > 120 and any(y in p for y in years)]
+    return "\n".join(paras)[:9000]
+
+
+def lyrics_text(artist, title, album=""):
+    try:
+        d = _get("https://lrclib.net/api/get?" + urllib.parse.urlencode({"artist_name": artist, "track_name": title, "album_name": album}), 0.5)
+        return (d.get("plainLyrics") or "")[:3500]
+    except Exception:
+        try:
+            d = _get("https://lrclib.net/api/get?" + urllib.parse.urlencode({"artist_name": artist, "track_name": title}), 0.5)
+            return (d.get("plainLyrics") or "")[:3500]
+        except Exception:
+            return ""
+
+
+MUSICIAN = re.compile(r"guitar|bass|drum|vocal|keyboard|piano|organ|harmonica|percussion|slide|sax|trumpet|violin|mandolin|sitar|tabla")
+
+
+# ---- album context (no AI: shared by every track of the album) --------------------------------
+def build_context(artist, album, year="", tracks=()):
+    ctx = {"artist": artist, "album": album, "year": (year or "")[:4], "mb": None, "albumWiki": "", "albumWikiTitle": "",
+           "bandWiki": "", "bandWikiTitle": "", "people": {}, "at": time.time()}
+    rg = mb_release_group(artist, album)
+    if rg:
+        ctx["mb"] = mb_details(rg, len(tracks))
+        ctx["year"] = (ctx["mb"]["date"] or ctx["year"])[:4]
+    mb = ctx["mb"] or {}
+    t = wiki_title_from_wikidata(mb.get("links", {}).get("wikidata")) or wiki_search_title("%s %s album" % (album, artist), must=[album])
+    if t:
+        ctx["albumWikiTitle"], text = wiki_article(t)
+        ctx["albumWiki"] = re.split(r"\n== (References|External links|Notes|Charts|Certifications) ==", text or "")[0][:30000]
+    t = mb_wiki("artist", mb.get("artist_id")) or wiki_search_title("%s band musician" % artist, must=[artist.split()[-1]])
+    if t:
+        ctx["bandWikiTitle"], text = wiki_article(t)
+        ctx["bandWiki"] = re.split(r"\n== (References|External links|Notes|Discography) ==", text or "")[0][:40000]
+    # the musicians: their biography around the time this was recorded
+    people = {}
+    for p in [x for ps in mb.get("credits", {}).values() for x in ps] + mb.get("album_credits", []):
+        if MUSICIAN.search(p["role"]) and p["name"] != artist:
+            people.setdefault(p["name"], p.get("id", ""))
+    for name, pid in list(people.items())[:6]:
+        try:
+            t = mb_wiki("artist", pid) or wiki_search_title("%s musician" % name, must=[name.split()[-1]])
+            if t:
+                real, text = wiki_article(t)
+                ctx["people"][name] = {"title": real, "text": around_year(text, ctx["year"])}
+        except Exception as e:
+            print("album info: %s: %s" % (name, e), flush=True)
+    return ctx
+
+
+# ---- the writer -------------------------------------------------------------------------------
+SYSTEM = """You write for a music player on a TV, for a listener deep into 60s/70s rock, blues and
+psychedelia. Warm, specific, never generic. Use ONLY the sources given: every statement must be
+backed by them, nothing from your own memory. If a section has no backing, leave it empty.
+No chart positions, sales figures, awards or praise words ("iconic", "legendary", "masterpiece").
+Do not put source ids or brackets in the text."""
+
+TRACK_TASK = """Now playing: "{title}" by {artist}, from "{album}" ({year}).
 Return JSON:
-{{"summary": "2-4 sentences: what this album is and why it matters",
-  "facts": [{{"text": "one fact, max 130 characters", "track": "exact track title or null", "source": "S1"}}],
-  "recording": "one clean sentence on where and when it was recorded (and by whom, if notable), or null"}}
-Facts are shown one at a time while the album plays, so make each one worth reading on its own:
-how a song came about, who it was written about or for, what happened in the studio, a notable
-performance (a guest, a famous solo), what happened after release. Do NOT list who played on
-a track: the player shows credits separately. Never write a fact that only says who is credited
-or who plays an instrument. At most 2 facts may be about people, and only if there is a story
-(a guest who dropped in, a famous solo, a stand-in). Give 6-12 facts. Tie a fact to a track (exact title from
-the list) only if it is about that track. Do not put source ids or brackets inside the text,
-the summary or the recording sentence: cite only in "source".
-"""
+{{"song": "2-3 sentences: what the song is about (from its lyrics and sources) and how it came to be",
+  "listen_for": ["1-4 things to listen for in THIS track, each naming a part, a player, an instrument or a technique (e.g. who plays the slide, a drum pattern, an overdub, a tuning). No vague items like 'the vocal' or 'the groove'."],
+  "players": [{{"name": "...", "plays": "what they play on this track"}}],
+  "moment": "1-2 sentences: what was happening in these musicians' lives around when this was recorded",
+  "sources": ["S1"]}}
+If the lyrics are the only source about the song itself, say plainly what the words are about,
+without interpreting beyond them. "song" is about this song only: no release dates, chart
+history or album background there.
+"listen_for" only lists details the sources actually describe for THIS track (a specific part,
+technique, overdub, instrument or moment). Never pad with generic lines like "X's bass supports
+the song" or "Y's drums drive the track": if the sources describe nothing specific, return an
+empty list. Fewer, real items beat more, vague ones."""
+
+ALBUM_TASK = """Album: "{album}" by {artist} ({year}).
+Return JSON:
+{{"summary": "2-3 sentences: what this album is and the story around it",
+  "stories": [{{"text": "max 170 characters", "about": "a track title, a musician or the band"}}],
+  "sources": ["S1"]}}
+Stories are what a hardcore fan would lean in for: wild or strange episodes, band drama,
+breakdowns, excess, myths, gear (who owned which guitar), how a song or riff came about,
+legendary gigs, accidents, who was in which band before, playing technique. Give the 8 best,
+best first. Skip tours or dates listed without a story."""
 
 ARTIST_TASK = """Artist: {artist}.
-Do not put source ids or brackets inside the text; cite only in "source".
-Return JSON:
-{{"bio": "3-5 sentences: who they are, when and where they started, what they are known for",
-  "facts": [{{"text": "one fact, max 130 characters", "source": "S1"}}]}}
-Give 4-8 facts."""
+Return JSON {{"bio": "3-5 sentences: who they are, where they came from, what they are known for",
+  "stories": [{{"text": "max 170 characters", "about": "a musician or the band"}}]}}
+Give 6 stories, the kind a hardcore fan would lean in for."""
 
 
 def _llm(task, sources):
@@ -344,7 +455,7 @@ def _llm(task, sources):
         "response_format": {"type": "json_object"},
     }).encode()
     res = _get("https://api.openai.com/v1/chat/completions", headers={"Authorization": "Bearer " + k, "Content-Type": "application/json"},
-               data=body, timeout=90)
+               data=body, timeout=180)
     return json.loads(res["choices"][0]["message"]["content"])
 
 
@@ -352,88 +463,123 @@ def _plain(text):
     return re.sub(r"\s*\[S\d+(?:,\s*S\d+)*\]", "", str(text or "")).strip()
 
 
-def _clean_facts(facts, source_ids, tracks=None):
-    out, titles = [], {_norm(t): t for t in (tracks or [])}
-    for f in facts or []:
-        if not isinstance(f, dict) or f.get("source") not in source_ids or not f.get("text"):
-            continue  # uncited or citing something that wasn't given: dropped
-        track = titles.get(_norm(f.get("track") or "")) if tracks else None
-        out.append({"text": _plain(f["text"])[:180], "track": track, "source": f["source"]})
+class _Sources:
+    def __init__(self):
+        self.items = []
+
+    def add(self, name, text, url=""):
+        if text and len(text.strip()) > 60:
+            self.items.append({"id": "S%d" % (len(self.items) + 1), "name": name, "text": text.strip(), "url": url})
+
+    def links(self):
+        return [{"id": s["id"], "name": s["name"], "url": s["url"]} for s in self.items]
+
+
+def _wurl(title):
+    return "https://en.wikipedia.org/wiki/" + urllib.parse.quote((title or "").replace(" ", "_"))
+
+
+def build_track(ctx, title):
+    mb = ctx.get("mb") or {}
+    src = _Sources()
+    src.add("Lyrics", lyrics_text(ctx["artist"], title, ctx["album"]))
+    # the song's own article: MusicBrainz work -> Wikidata -> Wikipedia (exact), else a careful search
+    work = next((w for t, w in mb.get("works", {}).items() if _norm(t) == _norm(title)), "")
+    song_title = mb_wiki("work", work)
+    if not song_title:
+        cand = wiki_search_title('"%s" %s song' % (title, ctx["artist"]), must=[title])
+        song_title = cand if cand and cand != ctx.get("albumWikiTitle") else None
+    if song_title:
+        real, text = wiki_article(song_title)
+        src.add("Wikipedia: " + (real or song_title), re.split(r"\n== (References|External links|Charts|Certifications) ==", text or "")[0][:15000], _wurl(real or song_title))
+    if ctx.get("albumWiki"):
+        src.add("Wikipedia: " + ctx["albumWikiTitle"], ctx["albumWiki"][:15000], _wurl(ctx["albumWikiTitle"]))
+    credits = next((v for t, v in mb.get("credits", {}).items() if _norm(t) == _norm(title)), [])
+    if credits:
+        src.add("MusicBrainz credits", "; ".join("%s (%s)" % (p["name"], p["role"]) for p in credits),
+                "https://musicbrainz.org/release-group/" + mb.get("mbid", ""))
+    names = [p["name"] for p in credits] or list(ctx.get("people", {}))
+    for n in names:
+        p = ctx.get("people", {}).get(n)
+        if p and p.get("text"):
+            src.add("Wikipedia: %s (around %s)" % (p["title"], ctx["year"]), p["text"], _wurl(p["title"]))
+    if ctx.get("bandWiki"):
+        src.add("Wikipedia: %s (around %s)" % (ctx["bandWikiTitle"], ctx["year"]), around_year(ctx["bandWiki"], ctx["year"]), _wurl(ctx["bandWikiTitle"]))
+    out = {"status": "none", "title": title, "artist": ctx["artist"], "album": ctx["album"], "at": time.time(), "sources": src.links()}
+    if len(src.items) < 1:
+        return out
+    res = _llm(TRACK_TASK.format(title=title, artist=ctx["artist"], album=ctx["album"], year=ctx["year"] or "?"), src.items)
+    listen = [_plain(x) for x in (res.get("listen_for") or []) if isinstance(x, str) and _plain(x)]
+    players = [{"name": _plain(p.get("name")), "plays": _plain(p.get("plays"))} for p in (res.get("players") or []) if isinstance(p, dict) and p.get("name")]
+    used = set(res.get("sources") or [])
+    out.update(status="ready", song=_plain(res.get("song")), listenFor=listen[:4], players=players,
+               moment=_plain(res.get("moment")), sources=[s for s in src.links() if not used or s["id"] in used] or src.links())
     return out
 
 
-# ---- album / artist -------------------------------------------------------------------------
-def build_album(artist, album, year="", tracks=()):
-    mb = None
-    rg = mb_release_group(artist, album)
-    if rg:
-        mb = mb_details(rg, len(tracks))
-    sources, links = [], []
-
-    def add(name, text, url=""):
-        if text and len(text) > 40:
-            sid = "S%d" % (len(sources) + 1)
-            sources.append({"id": sid, "name": name, "text": text})
-            links.append({"id": sid, "name": name, "url": url})
-
-    if mb:
-        lines = ["First released: %s" % mb["date"]] if mb["date"] else []
-        if mb["label"]:
-            lines.append("Label: %s" % mb["label"])
-        if mb["recorded"]:
-            lines.append("Recorded at: %s" % "; ".join(mb["recorded"]))
-        if mb["album_credits"]:
-            lines.append("Album credits: %s" % "; ".join("%s (%s)" % (p["name"], p["role"]) for p in mb["album_credits"]))
-        for t, people in mb["credits"].items():
-            lines.append("Track \"%s\": %s" % (t, "; ".join("%s (%s)" % (p["name"], p["role"]) for p in people)))
-        add("MusicBrainz", "\n".join(lines), "https://musicbrainz.org/release-group/" + mb["mbid"])
-    title, wiki = wikipedia_text(mb["links"].get("wikidata") if mb else None, search="%s %s album" % (album, artist))
-    if wiki:
-        add("Wikipedia: " + title, wiki, "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_")))
-    try:
-        dg = discogs_album(artist, album)
-    except Exception:
-        dg = None
-    if dg:
-        add("Discogs", (dg["notes"] + ("\nCredits: " + "; ".join("%s (%s)" % (c["name"], c["role"]) for c in dg["credits"][:40]) if dg["credits"] else "")).strip(),
-            "https://www.discogs.com" + dg["url"] if dg["url"].startswith("/") else dg["url"])
-    try:
-        lf = lastfm("album.getinfo", artist=artist, album=album)
-        wiki_lf = _strip(((lf or {}).get("album") or {}).get("wiki", {}).get("content", ""))
-    except Exception:
-        wiki_lf = ""
-    add("Last.fm", wiki_lf[:3000], "https://www.last.fm/music/%s/%s" % (urllib.parse.quote(artist), urllib.parse.quote(album)))
-
-    out = {"status": "none", "artist": artist, "album": album, "at": time.time(), "sources": links}
-    if mb:
-        out.update(date=mb["date"], label=mb["label"], recorded=mb["recorded"], credits=mb["credits"],
-                   albumCredits=mb["album_credits"], mbid=mb["mbid"], artistId=mb["artist_id"])
+def connections(ctx, library_artists):
+    """Other bands of the musicians on this album (MusicBrainz), marking the ones in the library."""
+    mb = ctx.get("mb") or {}
+    people = {}
+    for p in [x for ps in mb.get("credits", {}).values() for x in ps] + mb.get("album_credits", []):
+        if MUSICIAN.search(p["role"]) and p.get("id"):
+            people.setdefault(p["name"], {"id": p["id"], "role": p["role"]})
+    lib = {_norm(a): a for a in library_artists}
+    out = []
+    for name, p in list(people.items())[:10]:
         try:
-            out["discography"] = mb_discography(mb["artist_id"])
+            d = _mb("artist/%s" % p["id"], inc="artist-rels")
+        except Exception:
+            continue
+        bands = []
+        for rel in d.get("relations", []):
+            if rel.get("type") == "member of band" and rel.get("direction") == "forward":
+                b = rel["artist"]["name"]
+                if _norm(b) == _norm(ctx["artist"]) or any(_norm(x["name"]) == _norm(b) for x in bands):
+                    continue
+                start, end = (rel.get("begin") or "")[:4], (rel.get("end") or "")[:4]
+                bands.append({"name": b, "years": ("%s-%s" % (start, end)).strip("-") if start or end else "",
+                              "have": _norm(b) in lib, "libraryName": lib.get(_norm(b), "")})
+        if bands:
+            bands.sort(key=lambda b: (not b["have"], b["years"] or "9999"))
+            out.append({"name": name, "role": p["role"], "bands": bands[:6]})
+    out.sort(key=lambda c: not any(b["have"] for b in c["bands"]))
+    return out
+
+
+def build_album(ctx, library_artists=()):
+    mb = ctx.get("mb") or {}
+    src = _Sources()
+    if ctx.get("albumWiki"):
+        src.add("Wikipedia: " + ctx["albumWikiTitle"], ctx["albumWiki"], _wurl(ctx["albumWikiTitle"]))
+    if ctx.get("bandWiki"):
+        src.add("Wikipedia: " + ctx["bandWikiTitle"], ctx["bandWiki"], _wurl(ctx["bandWikiTitle"]))
+    out = {"status": "none", "artist": ctx["artist"], "album": ctx["album"], "at": time.time()}
+    if mb:
+        out.update(date=mb.get("date", ""), label=mb.get("label", ""), recorded=mb.get("recorded", []),
+                   credits={t: [{"name": p["name"], "role": p["role"]} for p in ps] for t, ps in mb.get("credits", {}).items()},
+                   albumCredits=[{"name": p["name"], "role": p["role"]} for p in mb.get("album_credits", [])], mbid=mb.get("mbid"))
+        try:
+            out["discography"] = mb_discography(mb.get("artist_id"))
         except Exception:
             out["discography"] = []
-    if not sources:
+        try:
+            out["connections"] = connections(ctx, library_artists)
+        except Exception as e:
+            print("album info: connections: %s" % e, flush=True)
+    out["sources"] = src.links()
+    if not src.items:
         return out
-    track_list = list(tracks) or (mb["tracks"] if mb else [])
-    res = _llm(ALBUM_TASK.format(album=album, artist=artist, year=(" (%s)" % year) if year else "",
-                                 tracks="; ".join(track_list) or "unknown"), sources)
-    ids = {s["id"] for s in sources}
-    out.update(status="ready", summary=_plain(res.get("summary")), recording=_plain(res.get("recording")) or None,
-               facts=_clean_facts(res.get("facts"), ids, track_list),
-               model=config.load().get("albumInfoModel") or MODEL_DEFAULT)
+    res = _llm(ALBUM_TASK.format(album=ctx["album"], artist=ctx["artist"], year=ctx.get("year") or "?"), src.items)
+    stories = [{"text": _plain(x.get("text"))[:220], "about": _plain(x.get("about"))} for x in (res.get("stories") or []) if isinstance(x, dict) and x.get("text")]
+    out.update(status="ready", summary=_plain(res.get("summary")), stories=stories[:10])
     return out
 
 
 def build_artist(name):
-    sources, links = [], []
-
-    def add(n, text, url=""):
-        if text and len(text) > 40:
-            sid = "S%d" % (len(sources) + 1)
-            sources.append({"id": sid, "name": n, "text": text})
-            links.append({"id": sid, "name": n, "url": url})
-
-    members, wd = [], None
+    src = _Sources()
+    members = []
+    t = None
     try:
         res = _mb("artist", query="artist:%s" % _q(name), limit=3)
         hit = next((a for a in res.get("artists", []) if int(a.get("score", 0)) >= 90), None)
@@ -441,36 +587,34 @@ def build_artist(name):
             full = _mb("artist/%s" % hit["id"], inc="url-rels+artist-rels")
             for rel in full.get("relations", []):
                 if rel.get("type") == "wikidata":
-                    wd = rel["url"]["resource"]
+                    t = wiki_title_from_wikidata(rel["url"]["resource"])
                 if rel.get("type") == "member of band" and rel.get("direction") == "backward":
                     start, end = (rel.get("begin") or "")[:4], (rel.get("end") or "")[:4]
                     span = ("%s-%s" % (start, end) if end else "%s-present" % start if not rel.get("ended") else start) if start else ""
-                    members.append({"name": rel["artist"]["name"], "years": span,
-                                    "role": ", ".join(rel.get("attributes", []))})
-            if members:
-                add("MusicBrainz", "Members: " + "; ".join("%s (%s%s)" % (m["name"], m["role"] + " " if m["role"] else "", m["years"]) for m in members),
-                    "https://musicbrainz.org/artist/" + hit["id"])
+                    members.append({"name": rel["artist"]["name"], "years": span, "role": ", ".join(rel.get("attributes", []))})
     except Exception:
         pass
-    title, wiki = wikipedia_text(wd, search="%s band musician" % name)
-    if wiki:
-        add("Wikipedia: " + title, wiki, "https://en.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_")))
-    try:
-        lf = lastfm("artist.getinfo", artist=name)
-        add("Last.fm", _strip(((lf or {}).get("artist") or {}).get("bio", {}).get("content", ""))[:3000],
-            "https://www.last.fm/music/" + urllib.parse.quote(name))
-    except Exception:
-        pass
-    out = {"status": "none", "artist": name, "members": members, "at": time.time(), "sources": links}
-    if not sources:
+    t = t or wiki_search_title("%s band musician" % name, must=[name.split()[-1]])
+    if t:
+        real, text = wiki_article(t)
+        src.add("Wikipedia: " + (real or t), re.split(r"\n== (References|External links|Discography) ==", text or "")[0][:40000], _wurl(real or t))
+    out = {"status": "none", "artist": name, "members": members, "at": time.time(), "sources": src.links()}
+    if not src.items:
         return out
-    res = _llm(ARTIST_TASK.format(artist=name), sources)
+    res = _llm(ARTIST_TASK.format(artist=name), src.items)
     out.update(status="ready", bio=_plain(res.get("bio")),
-               facts=_clean_facts(res.get("facts"), {s["id"] for s in sources}))
+               stories=[{"text": _plain(x.get("text"))[:220], "about": _plain(x.get("about"))} for x in (res.get("stories") or []) if isinstance(x, dict) and x.get("text")][:8])
     return out
 
 
-# ---- cache + background worker ----------------------------------------------------------------
+# ---- cache + on-demand queue ------------------------------------------------------------------
+# Nothing is prepared ahead: when a track is asked for (it is playing, or its card is opened),
+# that track goes first, then the rest of its album in order, then the album's story. Results
+# are cached on disk for good.
+LIBRARY_ARTISTS = []  # set by the server: names to mark "in your library"
+_ctx_lock = threading.Lock()
+
+
 def _load(kind, key):
     try:
         d = json.load(open(_cache_path(kind, key)))
@@ -481,8 +625,46 @@ def _load(kind, key):
         return None
 
 
+def _save(kind, key, d):
+    with open(_cache_path(kind, key) + ".tmp", "w") as fh:
+        json.dump(d, fh)
+    os.replace(_cache_path(kind, key) + ".tmp", _cache_path(kind, key))
+
+
+def _context(artist, album_name, year, tracks):
+    key = _key(artist, album_name)
+    with _ctx_lock:
+        d = _load("context", key)
+        if not d:
+            d = build_context(artist, album_name, year, tracks)
+            _save("context", key, d)
+    return d
+
+
+def track(artist, album_name, title, year="", tracks=()):
+    """Song card for a track, or {"status": "pending"} after queueing it (and its album)."""
+    if not enabled():
+        return {"status": "off"}
+    key = _key(artist, album_name, title)
+    d = _load("tracks", key)
+    if d:
+        return d
+    _enqueue(("tracks", key, artist, album_name, title, year, tuple(tracks)), front=True)
+    # then the rest of the album, in order, and its story: nothing beyond what is being played
+    rest = list(tracks)
+    if title in rest:
+        i = rest.index(title)
+        rest = rest[i + 1:] + rest[:i]
+    for t in rest:
+        k = _key(artist, album_name, t)
+        if not _load("tracks", k):
+            _enqueue(("tracks", k, artist, album_name, t, year, tuple(tracks)))
+    if not _load("albums", _key(artist, album_name)):
+        _enqueue(("albums", _key(artist, album_name), artist, album_name, year, tuple(tracks)))
+    return {"status": "pending"}
+
+
 def album(artist, album_name, year="", tracks=(), client=None):
-    """Cached notes, or {"status": "pending"} after queueing them (front of the queue)."""
     if not enabled():
         return {"status": "off"}
     key = _key(artist, album_name)
@@ -507,13 +689,30 @@ def artist(name):
 def _enqueue(job, front=False):
     with _qlock:
         if job[1] in PENDING:
-            if front and job in _queue:  # asked for again: move it to the front
-                _queue.remove(job)
-                _queue.insert(0, job)
+            if front:
+                for j in _queue:
+                    if j[1] == job[1]:
+                        _queue.remove(j)
+                        _queue.insert(0, j)
+                        break
             return
         PENDING.add(job[1])
-        _queue.insert(0, job) if front else _queue.append(job)
+        if front:
+            _queue.insert(0, job)
+        else:
+            _queue.append(job)
         _qlock.notify()
+
+
+def _run(job):
+    kind = job[0]
+    if kind == "tracks":
+        _, key, artist_, album_, title, year, tracks = job
+        return build_track(_context(artist_, album_, year, tracks), title)
+    if kind == "albums":
+        _, key, artist_, album_, year, tracks = job
+        return build_album(_context(artist_, album_, year, tracks), LIBRARY_ARTISTS)
+    return build_artist(job[2])
 
 
 def _worker():
@@ -524,37 +723,17 @@ def _worker():
             job = _queue.pop(0)
         kind, key = job[0], job[1]
         try:
-            d = build_album(*job[2:]) if kind == "albums" else build_artist(job[2])
-            with open(_cache_path(kind, key) + ".tmp", "w") as fh:
-                json.dump(d, fh)
-            os.replace(_cache_path(kind, key) + ".tmp", _cache_path(kind, key))
-            print("album info: %s %s -> %s (%d facts)" % (kind, job[2:4], d.get("status"), len(d.get("facts", []))), flush=True)
+            t = time.time()
+            d = _run(job)
+            _save(kind, key, d)
+            print("album info: %s %s -> %s in %.0fs" % (kind, job[2:5], d.get("status"), time.time() - t), flush=True)
         except Exception as e:
-            print("album info: %s %s failed: %s" % (kind, job[2:4], e), flush=True)
+            print("album info: %s %s failed: %s" % (kind, job[2:5], e), flush=True)
         finally:
             with _qlock:
                 PENDING.discard(key)
-        time.sleep(1)
-
-
-def backfill(client):
-    """Slowly prepare notes for the whole library (the playing album always jumps ahead)."""
-    time.sleep(120)
-    while True:
-        if enabled():
-            try:
-                for a in client.all_albums():
-                    if not _load("albums", _key(a["artist"], a["album"])):
-                        tracks = [t.get("title", "") for t in client.tracks(a["artist"], a["album"])]
-                        _enqueue(("albums", _key(a["artist"], a["album"]), a["artist"], a["album"], a.get("year", ""), tuple(tracks)))
-                        with _qlock:
-                            while len(_queue) > 3:
-                                _qlock.wait(5)
-            except Exception as e:
-                print("album info backfill: %s" % e, flush=True)
-        time.sleep(3600)
+        time.sleep(0.5)
 
 
 def start(client):
     threading.Thread(target=_worker, daemon=True).start()
-    threading.Thread(target=backfill, args=(client,), daemon=True).start()

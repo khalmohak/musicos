@@ -7,8 +7,7 @@ import { FormatBadges } from '../components/ui'
 import { type Lyrics, type Status, api, backdropUrl, coverUrl, fmtTime } from '../lib/api'
 import { setAccentFrom } from '../lib/color'
 import { Crossfade, FadeImage } from '../components/Fade'
-import { type AlbumInfo } from '../lib/api'
-import { factsFor, useAlbumInfo } from '../lib/info'
+import { cardLines, useTrackCard } from '../lib/info'
 import { useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 
@@ -90,7 +89,7 @@ export function NowPlaying({
   showFacts?: boolean
 }) {
   const song = status?.song
-  const info = useAlbumInfo(song?.artist, song?.album)
+  const card = useTrackCard(song?.artist, song?.album, song?.title)
   /** the album folder: cover, backdrop and accent only change when this does */
   const albumDir = song ? song.file.slice(0, song.file.lastIndexOf('/')) : ''
   const [zone, setZone] = useState<'scrub' | 'controls'>('controls')
@@ -127,7 +126,7 @@ export function NowPlaying({
     flash(c)
     if (c === 'lyrics') return lyrics ? (sfx.select(), toggleLyrics()) : sfx.edge()
     if (c === 'queue') return sfx.select(), onQueue()
-    if (c === 'about') return info?.status === 'ready' && onAbout ? (sfx.select(), onAbout()) : sfx.edge()
+    if (c === 'about') return onAbout ? (sfx.select(), onAbout()) : sfx.edge()
     onTransport(c)
   }
 
@@ -178,7 +177,7 @@ export function NowPlaying({
         onMouseEnter={() => (setZone('controls'), setFocus(CONTROLS.indexOf(c)))}
         className={`flex cursor-pointer items-center justify-center rounded-full transition-[transform,background-color,color,opacity] duration-300 ease-[var(--mo-spring)] ${big ? 'size-[4.4rem]' : 'size-[3.3rem]'} ${
           focused ? 'scale-110 bg-white text-[rgb(12_12_14)]' : c === 'lyrics' && lyricsOn ? 'bg-white/25 text-white' : 'bg-white/[0.08] text-white/80'
-        } ${pressed === c ? 'scale-90' : ''} ${(c === 'lyrics' && !lyrics) || (c === 'about' && info?.status !== 'ready') ? 'opacity-30' : ''}`}
+        } ${pressed === c ? 'scale-90' : ''} ${(c === 'lyrics' && !lyrics) || (c === 'about' && card?.status !== 'ready') ? 'opacity-30' : ''}`}
       >
         <Icon
           className={`${big ? 'size-[1.7rem]' : 'size-[1.3rem]'} ${solid ? 'fill-current' : ''} ${c === 'playpause' && !playing ? 'ml-1' : ''}`}
@@ -225,7 +224,7 @@ export function NowPlaying({
             )}
           </Crossfade>
           {lyricsOn && <LyricsPanel lyrics={lyrics} elapsed={elapsed} />}
-          {!lyricsOn && showFacts && <FactsLine info={info} track={song.title} trackKey={song.file} />}
+          {!lyricsOn && showFacts && <FactsLine lines={cardLines(card)} trackKey={song.file} />}
 
           {/* scrubber: Up to focus, then left/right */}
           <div className={`max-w-[36rem] ${lyricsOn ? 'mt-6' : 'mt-10'}`}>
@@ -315,23 +314,25 @@ function LyricsPanel({ lyrics, elapsed }: { lyrics: Lyrics | null; elapsed: numb
   )
 }
 
-/** One fact at a time under the title: about the playing track first, then the album.
- * Changes every 25 s with a crossfade; starts over when the track changes. */
-function FactsLine({ info, track, trackKey }: { info: AlbumInfo | null; track: string; trackKey: string }) {
-  const facts = useMemo(() => factsFor(info, track), [info, track])
+/** One line at a time under the title, from the playing song's card: what to listen for in this
+ * track, then what was going on when it was recorded. Every 20 s, crossfaded; resets per track. */
+function FactsLine({ lines, trackKey }: { lines: { label: string; text: string }[]; trackKey: string }) {
   const [i, setI] = useState(0)
   useEffect(() => setI(0), [trackKey])
   useEffect(() => {
-    if (facts.length < 2) return
-    const t = setInterval(() => setI((n) => (n + 1) % facts.length), 25000)
+    if (lines.length < 2) return
+    const t = setInterval(() => setI((n) => (n + 1) % lines.length), 20000)
     return () => clearInterval(t)
-  }, [facts.length, trackKey])
-  const f = facts[i % Math.max(1, facts.length)]
-  if (!f) return <div className="mt-7 h-[3.2rem]" />
+  }, [lines.length, trackKey])
+  const line = lines[i % Math.max(1, lines.length)]
+  if (!line) return <div className="mt-7 h-[4.2rem]" />
   return (
-    <div className="mt-7 h-[3.2rem] max-w-[36rem]">
+    <div className="mt-7 h-[4.2rem] max-w-[36rem]">
       <Crossfade k={`${trackKey}:${i}`}>
-        <div className="border-l-2 border-white/25 pl-4 text-[1rem] leading-snug text-white/70">{f.text}</div>
+        <div className="border-l-2 border-white/25 pl-4">
+          <div className="text-[0.72rem] font-medium tracking-[0.12em] text-white/40 uppercase">{line.label}</div>
+          <div className="mt-0.5 line-clamp-2 text-[1rem] leading-snug text-white/75">{line.text}</div>
+        </div>
       </Crossfade>
     </div>
   )
