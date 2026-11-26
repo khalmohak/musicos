@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import time as _time
 
-from . import config, device, installer, library, netshare, receivers, scan, system, updates
+from . import albuminfo, config, device, installer, library, netshare, receivers, scan, system, updates
 from .mpd import MPDError
 
 try:
@@ -403,6 +403,20 @@ def make_handler(client, ui_dir, covers, port):
                     return self._send(200, albums)
                 if p == "/api/library":
                     return self._send(200, library.overview(client if LIBRARY_MODE else None))
+                if p == "/api/info/album":
+                    artist_, album_ = q.get("artist", ""), q.get("album", "")
+                    tracks = [t.get("title", "") for t in client.tracks(artist_, album_)] if artist_ and album_ else []
+                    year = next((a.get("year", "") for a in client.all_albums() if a["artist"] == artist_ and a["album"] == album_), "")
+                    d = albuminfo.album(artist_, album_, year, tracks)
+                    if d.get("discography"):  # mark what's already in the library
+                        have = {(a["artist"].casefold(), albuminfo._norm(a["album"])) for a in client.all_albums()}
+                        d = dict(d, discography=[dict(x, have=(artist_.casefold(), albuminfo._norm(x["album"])) in have) for x in d["discography"]])
+                    return self._send(200, d)
+                if p == "/api/info/artist":
+                    return self._send(200, albuminfo.artist(q.get("name", "")))
+                if p == "/api/info/keys":
+                    k = albuminfo.keys()
+                    return self._send(200, {n: bool(k.get(n)) for n in ("openai", "discogs", "lastfm")})
                 if p == "/api/net/discover":
                     return self._send(200, netshare.discover())
                 if p == "/api/library/browse":
@@ -495,7 +509,7 @@ def make_handler(client, ui_dir, covers, port):
             try:
                 b = self._body()
                 ACTIVITY["at"], ACTIVITY["slept"] = _time.time(), False
-                safe = {k: ("***" if k == "password" else v) for k, v in b.items()} if isinstance(b, dict) else b
+                safe = {k: ("***" if k in ("password", "openai", "discogs", "lastfm") else v) for k, v in b.items()} if isinstance(b, dict) else b
                 print("POST %s %s" % (p, json.dumps(safe)), flush=True)
                 if p == "/api/receiver":
                     if self.client_address[0] not in ("127.0.0.1", "::1"):
@@ -532,6 +546,8 @@ def make_handler(client, ui_dir, covers, port):
                     else:
                         client.update()
                     return self._send(200, client.stats())
+                elif p == "/api/info/keys":
+                    return self._send(200, albuminfo.set_keys(b))
                 elif p == "/api/net/shares":
                     return self._send(200, netshare.shares(b.get("protocol", "smb"), b["server"], b.get("username", ""), b.get("password", "")))
                 elif p == "/api/net/test":
@@ -698,6 +714,7 @@ def serve(client, ui_dir, host, port, music_root):
     if type(client).__name__ == "MPDClient":
         threading.Thread(target=updates.auto_check, daemon=True).start()
         scan.start(client, os.path.realpath(music_root))
+        albuminfo.start(client)
     httpd = ThreadingHTTPServer((host, port), make_handler(client, ui_dir, covers, port))
     print("musicos-agent on http://%s:%d (ui: %s, music: %s, backend: %s)"
           % (host, port, ui_dir, music_root, type(client).__name__), flush=True)

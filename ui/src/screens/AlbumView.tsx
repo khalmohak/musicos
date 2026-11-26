@@ -1,5 +1,5 @@
 import { Button } from '@glyphui/ui'
-import { AudioLines, ListEnd, ListStart, Play, Shuffle, UserRound } from 'lucide-react'
+import { AudioLines, BookOpen, ListEnd, ListStart, Play, Shuffle, UserRound } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Cover } from '../components/Cover'
 import { FormatBadges } from '../components/ui'
@@ -9,8 +9,8 @@ import { moveSpatial, useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 
 export function AlbumView({
-  album, status, onBack, onPlayed, onArtist,
-}: { album: Album; status: Status | null; onBack: () => void; onPlayed: (s: Status) => void; onArtist: (name: string) => void }) {
+  album, status, onBack, onPlayed, onArtist, onAbout,
+}: { album: Album; status: Status | null; onBack: () => void; onPlayed: (s: Status) => void; onArtist: (name: string) => void; onAbout?: () => void }) {
   const [tracks, setTracks] = useState<Track[]>([])
   const [note, setNote] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -78,6 +78,12 @@ export function AlbumView({
               <Shuffle />
               Shuffle
             </Button>
+            {onAbout && (
+              <Button data-nav onClick={() => (sfx.select(), onAbout())}>
+                <BookOpen />
+                About
+              </Button>
+            )}
             {queueActive && (
               <>
                 <Button data-nav onClick={() => enqueue('next')}>

@@ -25,11 +25,11 @@ rm -rf /var/lib/bluetooth/*
 rm -rf /etc/musicos/* /etc/asound.conf
 # keep the library (folder list, links, last scan) unless erasing everything
 find /var/lib/musicos -mindepth 1 -maxdepth 1 ! -name updates ! -name library ! -name library.json \
-    ! -name last-scan.json ! -name covers -exec rm -rf {} +
+    ! -name last-scan.json ! -name covers ! -name info -exec rm -rf {} +
 
 if [ "$mode" = everything ]; then
     find /srv/music/local -mindepth 1 -delete 2>/dev/null
-    rm -rf /var/lib/musicos/library /var/lib/musicos/library.json /var/lib/musicos/last-scan.json /var/lib/musicos/covers
+    rm -rf /var/lib/musicos/library /var/lib/musicos/library.json /var/lib/musicos/last-scan.json /var/lib/musicos/covers /var/lib/musicos/info
     rm -f /var/lib/mpd/tag_cache /var/lib/mpd/library.db /var/lib/mpd/state /var/lib/mpd/sticker.sql
     rm -rf /var/lib/mpd/playlists/*
     rm -rf /var/cache/musicos-spotify/*

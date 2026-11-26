@@ -1,4 +1,4 @@
-import { ListMusic, MicVocal, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
+import { BookOpen, ListMusic, MicVocal, Pause, Play, SkipBack, SkipForward } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Cover } from '../components/Cover'
 import { ReceiverNowPlaying } from '../components/ReceiverNowPlaying'
@@ -7,11 +7,13 @@ import { FormatBadges } from '../components/ui'
 import { type Lyrics, type Status, api, backdropUrl, coverUrl, fmtTime } from '../lib/api'
 import { setAccentFrom } from '../lib/color'
 import { Crossfade, FadeImage } from '../components/Fade'
+import { type AlbumInfo } from '../lib/api'
+import { factsFor, useAlbumInfo } from '../lib/info'
 import { useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
 
 type Transport = 'playpause' | 'next' | 'prev' | 'volup' | 'voldown'
-const CONTROLS = ['prev', 'playpause', 'next', 'lyrics', 'queue'] as const
+const CONTROLS = ['prev', 'playpause', 'next', 'lyrics', 'about', 'queue'] as const
 type Control = (typeof CONTROLS)[number]
 
 /** Smooth playback position between 1 s status polls. */
@@ -74,7 +76,7 @@ function useScrub(duration: number, elapsed: number, file: string | undefined) {
 
 /** The record slides out of its sleeve and spins while it plays. Lyrics replace the details. */
 export function NowPlaying({
-  status, onBack, onTransport, onQueue,
+  status, onBack, onTransport, onQueue, onAbout, showFacts = true,
 }: {
   status: Status | null
   outputName?: string
@@ -82,8 +84,13 @@ export function NowPlaying({
   onBack: () => void
   onTransport: (k: Transport) => void
   onQueue: () => void
+  /** the album's story screen */
+  onAbout?: () => void
+  /** the facts line under the title (Settings) */
+  showFacts?: boolean
 }) {
   const song = status?.song
+  const info = useAlbumInfo(song?.artist, song?.album)
   /** the album folder: cover, backdrop and accent only change when this does */
   const albumDir = song ? song.file.slice(0, song.file.lastIndexOf('/')) : ''
   const [zone, setZone] = useState<'scrub' | 'controls'>('controls')
@@ -120,6 +127,7 @@ export function NowPlaying({
     flash(c)
     if (c === 'lyrics') return lyrics ? (sfx.select(), toggleLyrics()) : sfx.edge()
     if (c === 'queue') return sfx.select(), onQueue()
+    if (c === 'about') return info?.status === 'ready' && onAbout ? (sfx.select(), onAbout()) : sfx.edge()
     onTransport(c)
   }
 
@@ -161,7 +169,7 @@ export function NowPlaying({
 
   const btn = (c: Control, big = false) => {
     const focused = zone === 'controls' && CONTROLS[focus] === c
-    const Icon = c === 'prev' ? SkipBack : c === 'next' ? SkipForward : c === 'lyrics' ? MicVocal : c === 'queue' ? ListMusic : playing ? Pause : Play
+    const Icon = c === 'prev' ? SkipBack : c === 'next' ? SkipForward : c === 'lyrics' ? MicVocal : c === 'about' ? BookOpen : c === 'queue' ? ListMusic : playing ? Pause : Play
     const solid = c === 'playpause' || c === 'prev' || c === 'next'
     return (
       <span
@@ -170,7 +178,7 @@ export function NowPlaying({
         onMouseEnter={() => (setZone('controls'), setFocus(CONTROLS.indexOf(c)))}
         className={`flex cursor-pointer items-center justify-center rounded-full transition-[transform,background-color,color,opacity] duration-300 ease-[var(--mo-spring)] ${big ? 'size-[4.4rem]' : 'size-[3.3rem]'} ${
           focused ? 'scale-110 bg-white text-[rgb(12_12_14)]' : c === 'lyrics' && lyricsOn ? 'bg-white/25 text-white' : 'bg-white/[0.08] text-white/80'
-        } ${pressed === c ? 'scale-90' : ''} ${c === 'lyrics' && !lyrics ? 'opacity-30' : ''}`}
+        } ${pressed === c ? 'scale-90' : ''} ${(c === 'lyrics' && !lyrics) || (c === 'about' && info?.status !== 'ready') ? 'opacity-30' : ''}`}
       >
         <Icon
           className={`${big ? 'size-[1.7rem]' : 'size-[1.3rem]'} ${solid ? 'fill-current' : ''} ${c === 'playpause' && !playing ? 'ml-1' : ''}`}
@@ -217,6 +225,7 @@ export function NowPlaying({
             )}
           </Crossfade>
           {lyricsOn && <LyricsPanel lyrics={lyrics} elapsed={elapsed} />}
+          {!lyricsOn && showFacts && <FactsLine info={info} track={song.title} trackKey={song.file} />}
 
           {/* scrubber: Up to focus, then left/right */}
           <div className={`max-w-[36rem] ${lyricsOn ? 'mt-6' : 'mt-10'}`}>
@@ -260,6 +269,7 @@ export function NowPlaying({
             {btn('next')}
             <span className="w-3" />
             {btn('lyrics')}
+            {btn('about')}
             {btn('queue')}
           </div>
         </div>
@@ -301,6 +311,28 @@ function LyricsPanel({ lyrics, elapsed }: { lyrics: Lyrics | null; elapsed: numb
           )
         })}
       </div>
+    </div>
+  )
+}
+
+/** One fact at a time under the title: about the playing track first, then the album.
+ * Changes every 25 s with a crossfade; starts over when the track changes. */
+function FactsLine({ info, track, trackKey }: { info: AlbumInfo | null; track: string; trackKey: string }) {
+  const facts = useMemo(() => factsFor(info, track), [info, track])
+  const [i, setI] = useState(0)
+  useEffect(() => setI(0), [trackKey])
+  useEffect(() => {
+    if (facts.length < 2) return
+    const t = setInterval(() => setI((n) => (n + 1) % facts.length), 25000)
+    return () => clearInterval(t)
+  }, [facts.length, trackKey])
+  const f = facts[i % Math.max(1, facts.length)]
+  if (!f) return <div className="mt-7 h-[3.2rem]" />
+  return (
+    <div className="mt-7 h-[3.2rem] max-w-[36rem]">
+      <Crossfade k={`${trackKey}:${i}`}>
+        <div className="border-l-2 border-white/25 pl-4 text-[1rem] leading-snug text-white/70">{f.text}</div>
+      </Crossfade>
     </div>
   )
 }

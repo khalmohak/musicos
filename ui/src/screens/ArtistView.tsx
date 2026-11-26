@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Cover } from '../components/Cover'
 import { type Album, type ArtistInfo, type Status, albumKey, api, artistArtUrl, backdropUrl, coverUrl } from '../lib/api'
 import { setAccentFrom } from '../lib/color'
+import { useArtistInfo } from '../lib/info'
 import { useRemote } from '../lib/keys'
 import { reveal } from '../lib/motion'
 import { sfx } from '../lib/sounds'
@@ -13,6 +14,7 @@ export function ArtistView({
   name, onBack, onOpenAlbum, onPlayed,
 }: { name: string; onBack: () => void; onOpenAlbum: (a: Album) => void; onPlayed: (s: Status) => void }) {
   const [info, setInfo] = useState<ArtistInfo | null>(null)
+  const notes = useArtistInfo(name)
   const [zone, setZone] = useState<'actions' | 'albums'>('albums')
   const [idx, setIdx] = useState(0)
   const [logoOk, setLogoOk] = useState(true)
@@ -76,8 +78,16 @@ export function ArtistView({
             <h1 className="text-[3.6rem] leading-none font-semibold tracking-[-0.03em]">{name}</h1>
           )}
           <div className="mt-4 text-[1.05rem] text-white/65">
-            {albums.length === 1 ? '1 album' : `${albums.length} albums`}
+            {albums.length === 1 ? '1 album in your library' : `${albums.length} albums in your library`}
           </div>
+          {notes?.status === 'ready' && notes.bio && (
+            <p className="mo-fade-in mt-4 line-clamp-4 max-w-[52rem] text-[1.05rem] leading-relaxed text-white/75">{notes.bio}</p>
+          )}
+          {notes?.status === 'ready' && !!notes.members?.length && (
+            <div className="mo-fade-in mt-3 max-w-[60rem] truncate text-[0.88rem] text-white/45">
+              {notes.members.map((m) => `${m.name}${m.years ? ` ${m.years.replace('-', '–')}` : ''}`).join(' · ')}
+            </div>
+          )}
           <div className="mt-6">
             <Button
               className={zone === 'actions' ? 'bg-white! text-[rgb(12_12_14)]! scale-[1.06]' : ''}

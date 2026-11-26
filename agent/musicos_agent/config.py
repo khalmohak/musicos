@@ -29,6 +29,9 @@ DEFAULTS = {
     "spotify": True,
     "airplay": True,
     "receiverName": "musicos",
+    "albumInfo": True,  # album/artist notes and facts (needs an OpenAI key in secrets/ai.json)
+    "albumInfoModel": "",  # "" = albuminfo.MODEL_DEFAULT
+    "nowPlayingFacts": True,  # the facts line under the title on Now Playing
     "perfProbe": False,  # diagnostics: the UI posts frame-time summaries to /api/perf
 }
 EDITABLE = set(DEFAULTS)

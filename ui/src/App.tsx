@@ -14,6 +14,7 @@ import { Screensaver } from './screens/Screensaver'
 import { SearchView } from './screens/SearchView'
 import { Settings } from './screens/Settings'
 import { SourcesView } from './screens/SourcesView'
+import { AlbumStory } from './screens/AlbumStory'
 import { NewDriveDialog } from './components/NewDriveDialog'
 import { startPerfProbe } from './lib/perf'
 import { Setup } from './screens/Setup'
@@ -28,6 +29,7 @@ type Screen =
   | { kind: 'search' }
   | { kind: 'settings' }
   | { kind: 'sources'; pick?: string }
+  | { kind: 'story'; artist: string; album: string; file: string }
 
 type Transport = 'playpause' | 'next' | 'prev' | 'volup' | 'voldown'
 const MIN_BOOT_MS = 1800
@@ -237,7 +239,7 @@ export function App() {
     return () => clearTimeout(t)
   }, [onHome])
 
-  const screenKey = screen ? `${screen.kind}:${screen.kind === 'album' ? screen.album.file : screen.kind === 'artist' ? screen.name : ''}` : ''
+  const screenKey = screen ? `${screen.kind}:${screen.kind === 'album' ? screen.album.file : screen.kind === 'artist' ? screen.name : screen.kind === 'story' ? screen.album : ''}` : ''
 
   return (
     <>
@@ -276,7 +278,8 @@ export function App() {
         />
       )}
       {screen?.kind === 'album' && (
-        <AlbumView key={screen.album.file} album={screen.album} status={status} onBack={pop} onPlayed={played} onArtist={openArtist} />
+        <AlbumView key={screen.album.file} album={screen.album} status={status} onBack={pop} onPlayed={played} onArtist={openArtist}
+          onAbout={() => push({ kind: 'story', artist: screen.album.artist, album: screen.album.album, file: screen.album.file })} />
       )}
       {screen?.kind === 'artist' && (
         <ArtistView key={screen.name} name={screen.name} onBack={pop} onOpenAlbum={openAlbum} onPlayed={played} />
@@ -289,6 +292,8 @@ export function App() {
           onBack={pop}
           onTransport={transport}
           onQueue={() => open({ kind: 'queue' })}
+          onAbout={() => status?.song && push({ kind: 'story', artist: status.song.artist, album: status.song.album, file: status.song.file })}
+          showFacts={config.nowPlayingFacts !== false}
         />
       )}
       {screen?.kind === 'queue' && <QueueView status={status} onBack={pop} onPlayed={(s) => (setStatus(s), pop())} />}
@@ -297,6 +302,7 @@ export function App() {
         <Settings config={config} onConfig={setConfig} onBack={pop} onRerunSetup={() => setStack([{ kind: 'setup' }])} onSources={() => open({ kind: 'sources' })} />
       )}
       {screen?.kind === 'sources' && <SourcesView onBack={pop} pick={screen.pick} />}
+      {screen?.kind === 'story' && <AlbumStory artist={screen.artist} album={screen.album} file={screen.file} status={status} onBack={pop} />}
       </div>
       )}
       <NewDriveDialog enabled={!!config?.setupComplete && screen?.kind !== 'setup' && !idle}

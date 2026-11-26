@@ -166,6 +166,7 @@ export interface ArtistInfo {
 }
 export interface Config {
   setupComplete: boolean
+  nowPlayingFacts?: boolean
   perfProbe?: boolean
   name: string
   uiSounds: boolean
@@ -240,6 +241,31 @@ export interface NetLogin {
   path?: string
   username?: string
   password?: string
+}
+export interface InfoFact {
+  text: string
+  track: string | null
+  source: string
+}
+export interface AlbumInfo {
+  status: 'ready' | 'pending' | 'none' | 'off'
+  summary?: string
+  recording?: string | null
+  facts?: InfoFact[]
+  date?: string
+  label?: string
+  recorded?: string[]
+  credits?: Record<string, { name: string; role: string }[]>
+  albumCredits?: { name: string; role: string }[]
+  discography?: { album: string; year: string; have?: boolean }[]
+  sources?: { id: string; name: string; url: string }[]
+}
+export interface ArtistNotes {
+  status: 'ready' | 'pending' | 'none' | 'off'
+  bio?: string
+  facts?: InfoFact[]
+  members?: { name: string; years: string; role: string }[]
+  sources?: { id: string; name: string; url: string }[]
 }
 export interface ScanStatus {
   active: boolean
@@ -381,6 +407,8 @@ export const api = {
     req<{ id: string }>('/api/sources/smb', s),
   removeSource: (id: string) => req<{ ok: boolean }>('/api/sources/remove', { id }),
   library: () => req<LibraryOverview>('/api/library'),
+  albumInfo: (artist: string, album: string) => req<AlbumInfo>(`/api/info/album?artist=${q(artist)}&album=${q(album)}`),
+  artistInfo: (name: string) => req<ArtistNotes>(`/api/info/artist?name=${q(name)}`),
   libraryBrowse: (source: string, path = '') => req<BrowseResult>(`/api/library/browse?source=${q(source)}&path=${q(path)}`),
   libraryAdd: (source: string, path: string) => req<LibraryFolder>('/api/library/add', { source, path }),
   libraryRemove: (id: string) => req<{ ok: boolean }>('/api/library/remove', { id }),
