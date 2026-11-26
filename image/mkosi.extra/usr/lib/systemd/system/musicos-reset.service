@@ -1,0 +1,7 @@
+# Settings > About > Reset (see /usr/local/lib/musicos/reset)
+[Unit]
+Description=Reset musicos settings
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/musicos/reset

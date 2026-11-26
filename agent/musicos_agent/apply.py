@@ -40,7 +40,7 @@ def apply_mounts():
     wanted = set()
     for s in config.sources():
         sid = s.get("id", "")
-        if s.get("type") != "smb" or not SAFE_ID.match(sid) or not SAFE_HOST.match(s.get("server", "")) \
+        if s.get("type") not in ("smb", "nfs") or not SAFE_ID.match(sid) or not SAFE_HOST.match(s.get("server", "")) \
                 or not SAFE_PATH.match(s.get("share", "") + s.get("path", "")):
             print("skipping invalid source %r" % sid)
             continue
@@ -48,17 +48,22 @@ def apply_mounts():
         # unit name for /srv/music/net-<id>: "/" -> "-", "-" -> "\x2d" (ids are [a-z0-9-])
         unit = "srv-music-" + ("net-" + sid).replace("-", "\\x2d")
         where = os.path.join(MUSIC_ROOT, "net-" + sid)
-        what = "//%s/%s" % (s["server"], s["share"]) + ("/" + s["path"] if s.get("path") else "")
-        src = os.path.join(config.state_dir(), "secrets", sid + ".cred")
-        cred = os.path.join(CRED_DIR, sid)
-        if os.path.exists(src):
-            shutil.copyfile(src, cred)
-            os.chmod(cred, 0o600)
+        if s["type"] == "nfs":
+            what = "%s:%s" % (s["server"], s["share"]) + ("/" + s["path"] if s.get("path") else "")
+            fstype, opts = "nfs", "ro,soft,timeo=100,retrans=2,_netdev"
+        else:
+            what = "//%s/%s" % (s["server"], s["share"]) + ("/" + s["path"] if s.get("path") else "")
+            src = os.path.join(config.state_dir(), "secrets", sid + ".cred")
+            cred = os.path.join(CRED_DIR, sid)
+            if os.path.exists(src):
+                shutil.copyfile(src, cred)
+                os.chmod(cred, 0o600)
+            fstype = "cifs"
+            opts = "ro,credentials=%s,iocharset=utf8,uid=mpd,gid=audio,file_mode=0644,dir_mode=0755,_netdev" % cred
         write(os.path.join(UNIT_DIR, unit + ".mount"), (
             "[Unit]\nDescription=musicos network share %s\nAfter=network-online.target\n"
-            "Wants=network-online.target\n\n[Mount]\nWhat=%s\nWhere=%s\nType=cifs\n"
-            "Options=ro,credentials=%s,iocharset=utf8,uid=mpd,gid=audio,file_mode=0644,dir_mode=0755,_netdev\n"
-            "TimeoutSec=30\n") % (s.get("name", sid), what.replace(" ", "\\040"), where, cred))
+            "Wants=network-online.target\n\n[Mount]\nWhat=%s\nWhere=%s\nType=%s\n"
+            "Options=%s\nTimeoutSec=30\n") % (s.get("name", sid), what.replace(" ", "\\040"), where, fstype, opts))
         write(os.path.join(UNIT_DIR, unit + ".automount"), (
             "[Unit]\nDescription=musicos network share %s (automount)\n\n[Automount]\nWhere=%s\n"
             "TimeoutIdleSec=0\n\n[Install]\nWantedBy=multi-user.target\n") % (s.get("name", sid), where))

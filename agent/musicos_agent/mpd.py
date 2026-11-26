@@ -4,6 +4,7 @@ One short-lived TCP connection per call: MPD is local, so connect cost is neglig
 and we never have to handle idle-timeout reconnects.
 """
 import socket
+import time
 from collections import OrderedDict
 
 
@@ -180,10 +181,15 @@ class MPDClient:
                 "songs": int(st.get("songs", 0)), "updating": updating, "dbUpdate": st.get("db_update", "")}
 
     def all_albums(self):
-        """Every album in the library (one listallinfo, cached until the MPD db changes)."""
-        stamp = dict(self._cmd("stats")).get("db_update", "")
+        """Every album in the library (one listallinfo, cached until the MPD db changes).
+        The song count is part of the key so albums appear while a scan is still running."""
+        st = dict(self._cmd("stats"))
+        stamp = (st.get("db_update", ""), st.get("songs", ""))
         cached = getattr(self, "_album_cache", None)
         if cached and cached[0] == stamp:
+            return cached[1]
+        # mid-scan (only the count moved): rebuild at most every 20 s, listallinfo is heavy
+        if cached and cached[0][0] == stamp[0] and time.time() - cached[2] < 20:
             return cached[1]
         out = OrderedDict()
         for s in self._songs(self._cmd("listallinfo")):
@@ -199,11 +205,28 @@ class MPDClient:
             out[key]["tracks"] += 1
         albums = sorted(out.values(), key=lambda a: (a["artist"].casefold(), a["year"] or "9999",
                                                      a["album"].casefold()))
-        self._album_cache = (stamp, albums)
+        self._album_cache = (stamp, albums, time.time())
         return albums
 
-    def update(self):
-        self._cmd("update")
+    def update(self, path=None):
+        """Scan for new/changed files: one library folder (path = folder id), or everything."""
+        self._cmd("update %s" % quote(path) if path else "update")
+
+    def rescan(self, path=None):
+        """Re-read every file's tags."""
+        self._cmd("rescan %s" % quote(path) if path else "rescan")
+
+    def folder_counts(self):
+        """{folder id: {"albums", "tracks", "seconds"}} for the library overview."""
+        out = {}
+        for a in self.all_albums():
+            c = out.setdefault(a["file"].split("/", 1)[0], {"albums": 0, "tracks": 0, "seconds": 0})
+            c["albums"] += 1
+            c["tracks"] += a["tracks"]
+        for fid, c in out.items():
+            st = dict(self._cmd("count base %s" % quote(fid)))
+            c["seconds"] = int(float(st.get("playtime", 0)))
+        return out
 
     # ---- playback ----
     def status(self):

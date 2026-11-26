@@ -32,7 +32,7 @@ if [ -e /usr/lib/systemd/system/raspotify.service ] || [ -e /lib/systemd/system/
 fi
 
 # Distro services: enabled once, the links live in /etc on the persistent root.
-systemctl enable NetworkManager systemd-resolved systemd-timesyncd avahi-daemon ssh mpd bluetooth bluealsa shairport-sync
+systemctl enable NetworkManager systemd-resolved chrony avahi-daemon ssh mpd bluetooth bluealsa shairport-sync
 
 # musicos services: enabled from /usr (static .wants links), so services added or removed by
 # an update take effect without touching /etc.
@@ -41,7 +41,7 @@ static_enable() {  # unit target
     ln -sf "../$1" "/usr/lib/systemd/system/$2.wants/$1"
 }
 for u in musicos-agent.service musicos-apply.path musicos-apply.service musicos-input.service \
-         musicos-report.path musicos-update.path musicos-install.path musicos-spotify.service; do
+         musicos-report.path musicos-update.path musicos-install.path musicos-reset.path musicos-spotify.service; do
     [ -e "/usr/lib/systemd/system/$u" ] && static_enable "$u" multi-user.target
 done
 static_enable musicos-kiosk.service graphical.target

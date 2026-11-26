@@ -1,0 +1,40 @@
+#!/bin/sh
+# Run by musicos-reset.service (root) when the UI asks. Reads the mode from reset-request:
+#   settings    preferences, Wi-Fi, Bluetooth pairings, network shares, audio/display choices
+#   everything  the above + music copied onto this device + the library index
+# Never touches: music drives (USB / internal / shares), the installed versions (/usr, ESP),
+# SSH keys. Restarts into the first-run setup afterwards.
+set -u
+req=/var/lib/musicos/reset-request
+mode=$(cat "$req" 2>/dev/null || echo "")
+rm -f "$req"
+case "$mode" in settings|everything) ;; *) echo "reset: unknown mode '$mode'"; exit 1 ;; esac
+echo "reset: $mode"
+
+systemctl stop musicos-agent.service mpd.service shairport-sync.service musicos-spotify.service 2>/dev/null
+
+# network shares mounted by musicos (units written by musicos-apply)
+for u in /etc/systemd/system/srv-music-net*.mount /etc/systemd/system/srv-music-net*.automount; do
+    [ -e "$u" ] && systemctl disable --now "$(basename "$u")" 2>/dev/null; rm -f "$u"
+done
+rm -rf /etc/systemd/system/multi-user.target.wants/srv-music-net* /etc/systemd/system/remote-fs.target.wants/srv-music-net*
+# Wi-Fi and other saved connections, Bluetooth pairings
+rm -f /etc/NetworkManager/system-connections/*
+rm -rf /var/lib/bluetooth/*
+# musicos settings (receivers name, share passwords, audio default), keep the folder layout
+rm -rf /etc/musicos/* /etc/asound.conf
+# keep the library (folder list, links, last scan) unless erasing everything
+find /var/lib/musicos -mindepth 1 -maxdepth 1 ! -name updates ! -name library ! -name library.json \
+    ! -name last-scan.json ! -name covers -exec rm -rf {} +
+
+if [ "$mode" = everything ]; then
+    find /srv/music/local -mindepth 1 -delete 2>/dev/null
+    rm -rf /var/lib/musicos/library /var/lib/musicos/library.json /var/lib/musicos/last-scan.json /var/lib/musicos/covers
+    rm -f /var/lib/mpd/tag_cache /var/lib/mpd/library.db /var/lib/mpd/state /var/lib/mpd/sticker.sql
+    rm -rf /var/lib/mpd/playlists/*
+    rm -rf /var/cache/musicos-spotify/*
+fi
+systemd-tmpfiles --create /usr/lib/tmpfiles.d/musicos.conf 2>/dev/null
+sync
+echo "reset: done, restarting"
+systemctl reboot

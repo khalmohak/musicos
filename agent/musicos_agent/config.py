@@ -111,6 +111,20 @@ def add_smb(name, server, share, path="", username="", password=""):
     return sid
 
 
+def add_nfs(name, server, export, path=""):
+    for field, value in (("server", server), ("export", export)):
+        if not value or any(c in value for c in "\n\r\0\""):
+            raise ValueError("invalid %s" % field)
+    sid = SLUG_RE.sub("-", (name or export.rsplit("/", 1)[-1] or server).lower()).strip("-")[:24] or "nfs"
+    with _lock:
+        items = [s for s in sources() if s["id"] != sid]
+        items.append({"id": sid, "type": "nfs", "name": name or export, "server": server.strip(),
+                      "share": "/" + export.strip("/ "), "path": (path or "").strip("/ ")})
+        _write("sources.json", items)
+    request_apply()
+    return sid
+
+
 def remove_source(sid):
     with _lock:
         _write("sources.json", [s for s in sources() if s["id"] != sid])

@@ -8,6 +8,7 @@ import { OnScreenKeyboard } from '../components/OnScreenKeyboard'
 import { AccessCard, LibraryPanel, NetworkPanel, SoundPanel, TimezonePicker } from '../components/panels'
 import { Record, Wordmark } from '../components/Record'
 import { RemoteIcon } from '../components/icons'
+import { SourcesView } from './SourcesView'
 import { PhotoBackdrop } from '../components/PhotoBackdrop'
 import { PageDots, StepShell } from '../components/ui'
 import { type Config, api } from '../lib/api'
@@ -20,6 +21,7 @@ const ICON = 'size-[2.1rem] text-white/85'
 export function Setup({ config: initial, onDone }: { config: Config; onDone: (c: Config) => void }) {
   const [step, setStep] = useState(() => Number(new URLSearchParams(location.search).get('step')) || 0)
   const [config, setConfig] = useState(initial)
+  const [sources, setSources] = useState(false)
   const [name, setName] = useState(initial.name)
   const ref = useRef<HTMLDivElement>(null)
   const id = STEPS[step]
@@ -57,6 +59,9 @@ export function Setup({ config: initial, onDone }: { config: Config; onDone: (c:
       <ArrowRight />
     </Button>
   )
+
+  // Music sources opens over setup, so the step you were on is kept
+  if (sources) return <SourcesView onBack={() => setSources(false)} />
 
   return (
     <div className="tv relative flex h-full flex-col">
@@ -116,7 +121,7 @@ export function Setup({ config: initial, onDone }: { config: Config; onDone: (c:
         {id === 'music' && (
           <StepShell split actions={nextButton()} icon={<Library className={ICON} strokeWidth={1.5} />} title="Bring your music" sub="Internal and USB drives are found automatically. You can also copy albums in over the network.">
             <div className="flex flex-col gap-6">
-              <LibraryPanel />
+              <LibraryPanel onSources={() => setSources(true)} />
               <AccessCard />
             </div>
           </StepShell>

@@ -48,6 +48,10 @@ body {
 /* lift: the tvOS "this is what OK will do" */
 .lift {
   transition: transform 320ms var(--mo-spring);
+}
+/* a GPU layer only for the focused tile, not one per tile (300+ full-size layers is too much
+   for integrated graphics and made the album wall stutter) */
+.lift.is-focused {
   will-change: transform;
 }
 .lift::after {
@@ -221,7 +225,18 @@ body {
 }
 .mo-page {
   height: 100%;
-  animation: mo-page 420ms var(--mo-ease) both;
+  animation: mo-page 380ms var(--mo-ease) both;
+}
+/* between two screens that aren't Home there is nothing behind to crossfade with: no fade
+   through black, only a short settle */
+@keyframes mo-page-swap {
+  from {
+    transform: scale(1.008);
+  }
+}
+.mo-page-swap {
+  height: 100%;
+  animation: mo-page-swap 260ms var(--mo-ease) both;
 }
 /* crossfade for content that changes in place (track title, cover) */
 @keyframes mo-xfade {
@@ -265,3 +280,10 @@ body.mo-pointer .lift,
 body.mo-pointer button {
   cursor: pointer;
 }
+
+/* indeterminate progress (scan: still counting files) */
+@keyframes mo-indeterminate {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(320%); }
+}
+.mo-indeterminate { animation: mo-indeterminate 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite; }

@@ -13,6 +13,7 @@ import { QueueView } from './screens/QueueView'
 import { Screensaver } from './screens/Screensaver'
 import { SearchView } from './screens/SearchView'
 import { Settings } from './screens/Settings'
+import { SourcesView } from './screens/SourcesView'
 import { Setup } from './screens/Setup'
 
 type Screen =
@@ -24,6 +25,7 @@ type Screen =
   | { kind: 'queue' }
   | { kind: 'search' }
   | { kind: 'settings' }
+  | { kind: 'sources' }
 
 type Transport = 'playpause' | 'next' | 'prev' | 'volup' | 'voldown'
 const MIN_BOOT_MS = 1800
@@ -41,6 +43,7 @@ export function App() {
   const [idle, setIdle] = useState(() => new URLSearchParams(location.search).has('saver'))
   const lastInput = useRef(Date.now())
   const lastBeat = useRef(0)
+  const lastStatus = useRef('')
   const [power, setPower] = useState(() => new URLSearchParams(location.search).has('power'))
   const screen = stack[stack.length - 1]
 
@@ -70,7 +73,7 @@ export function App() {
           const params = new URLSearchParams(location.search)
           const go = import.meta.env.DEV || params.has('debug') ? params.get('go') : null
           const extra: Screen | null =
-            go === 'playing' || go === 'settings' || go === 'queue' || go === 'search' ? { kind: go }
+            go === 'playing' || go === 'settings' || go === 'queue' || go === 'search' || go === 'sources' ? { kind: go }
               : go === 'setup' ? { kind: 'setup' }
                 : go?.startsWith('album:') && a[Number(go.slice(6))] ? { kind: 'album', album: a[Number(go.slice(6))] }
                   : go?.startsWith('artist:') ? { kind: 'artist', name: decodeURIComponent(go.slice(7)) }
@@ -98,6 +101,9 @@ export function App() {
   useEffect(() => {
     const t = setInterval(() => {
       api.status().then((s) => {
+        const sig = JSON.stringify(s)
+        if (sig === lastStatus.current) return
+        lastStatus.current = sig
         setStatus(s)
         configureSounds({ musicPlaying: s.state === 'play' })
       }).catch(() => {})
@@ -203,23 +209,30 @@ export function App() {
   const openAlbum = (album: Album) => push({ kind: 'album', album })
   const openArtist = (name: string) => push({ kind: 'artist', name })
 
+  // Home stays rendered under every other screen: covers stay decoded and the scroll position
+  // kept, Back is instant, and a screen opened from Home crossfades over it instead of
+  // fading in from black. It is hidden (not unmounted) once the new screen has settled.
+  const homeBelow = stack[0]?.kind === 'home'
+  const onHome = screen?.kind === 'home'
+  const [homeShown, setHomeShown] = useState(true)
+  const fromHome = useRef(true)
+  const prevKind = useRef(screen?.kind)
+  if (prevKind.current !== screen?.kind) {
+    fromHome.current = prevKind.current === 'home'
+    prevKind.current = screen?.kind
+  }
+  useEffect(() => {
+    if (onHome) return setHomeShown(true)
+    const t = setTimeout(() => setHomeShown(false), 480)
+    return () => clearTimeout(t)
+  }, [onHome])
+
   const screenKey = screen ? `${screen.kind}:${screen.kind === 'album' ? screen.album.file : screen.kind === 'artist' ? screen.name : ''}` : ''
 
   return (
     <>
-      <div key={screenKey} className="mo-page">
-      {config && screen?.kind === 'setup' && (
-        <Setup
-          config={config}
-          onDone={async (c) => {
-            setConfig(c)
-            setAlbums(await api.albums().catch(() => albums))
-            api.artists().then(setArtists).catch(() => {})
-            goHome()
-          }}
-        />
-      )}
-      {config && screen?.kind === 'home' && (
+      {config && homeBelow && (
+        <div className="fixed inset-0" style={{ visibility: onHome || homeShown ? 'visible' : 'hidden' }} aria-hidden={!onHome}>
         <Home
           albums={albums}
           artists={artists}
@@ -234,8 +247,24 @@ export function App() {
           onNowPlaying={() => open({ kind: 'playing' })}
           onSearch={() => open({ kind: 'search' })}
           onSettings={() => open({ kind: 'settings' })}
+          onSources={() => open({ kind: 'sources' })}
           onPower={() => setPower(true)}
           onTransport={transport}
+          active={onHome && !power && !idle}
+        />
+        </div>
+      )}
+      {!onHome && (
+      <div key={screenKey} className={`fixed inset-0 ${fromHome.current ? 'mo-page' : 'mo-page-swap'}`}>
+      {config && screen?.kind === 'setup' && (
+        <Setup
+          config={config}
+          onDone={async (c) => {
+            setConfig(c)
+            setAlbums(await api.albums().catch(() => albums))
+            api.artists().then(setArtists).catch(() => {})
+            goHome()
+          }}
         />
       )}
       {screen?.kind === 'album' && (
@@ -257,9 +286,11 @@ export function App() {
       {screen?.kind === 'queue' && <QueueView status={status} onBack={pop} onPlayed={(s) => (setStatus(s), pop())} />}
       {screen?.kind === 'search' && <SearchView onBack={pop} onOpenAlbum={openAlbum} onOpenArtist={openArtist} onPlayed={played} />}
       {config && screen?.kind === 'settings' && (
-        <Settings config={config} onConfig={setConfig} onBack={pop} onRerunSetup={() => setStack([{ kind: 'setup' }])} />
+        <Settings config={config} onConfig={setConfig} onBack={pop} onRerunSetup={() => setStack([{ kind: 'setup' }])} onSources={() => open({ kind: 'sources' })} />
       )}
+      {screen?.kind === 'sources' && <SourcesView onBack={pop} />}
       </div>
+      )}
       {power && <PowerMenu onClose={() => setPower(false)} />}
       {screen?.kind !== 'setup' && <VolumeOsd volume={status?.volume} />}
       {idle && <Screensaver status={status} albums={albums} />}

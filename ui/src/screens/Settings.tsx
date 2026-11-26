@@ -1,4 +1,4 @@
-import { Airplay, AudioLines, HardDriveDownload, Bluetooth, Clock, FileText, Gamepad2, Info, Library, MonitorPlay, RefreshCw, RotateCcw, SquareTerminal, Tv, Wifi } from 'lucide-react'
+import { Airplay, AlertTriangle, AudioLines, Eraser, HardDriveDownload, X, Bluetooth, Clock, FileText, Gamepad2, Info, Library, MonitorPlay, RefreshCw, RotateCcw, SquareTerminal, Tv, Wifi } from 'lucide-react'
 import { RemoteIcon } from '../components/icons'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { AccessCard, BluetoothPanel, DisplayPanel, LibraryPanel, NetworkExtras, NetworkPanel, ReceiversPanel, SoundPanel, TimezonePicker, UpdatePanel } from '../components/panels'
@@ -28,7 +28,8 @@ type SectionId = (typeof SECTIONS)[number]['id']
 
 export function Settings({
   config, onConfig, onBack, onRerunSetup,
-}: { config: Config; onConfig: (c: Config) => void; onBack: () => void; onRerunSetup: () => void }) {
+  onSources,
+}: { config: Config; onConfig: (c: Config) => void; onBack: () => void; onRerunSetup: () => void; onSources: () => void }) {
   const [section, setSection] = useState<SectionId>(() => (new URLSearchParams(location.search).get('section') as SectionId) || 'audio')
   const [zone, setZone] = useState<'nav' | 'panel'>('nav')
   const nav = useRef<HTMLDivElement>(null)
@@ -133,7 +134,7 @@ export function Settings({
           {section === 'bluetooth' && <BluetoothPanel />}
           {section === 'streaming' && <ReceiversPanel />}
           {section === 'time' && <TimezonePicker />}
-          {section === 'library' && <LibraryPanel />}
+          {section === 'library' && <LibraryPanel onSources={onSources} />}
           {section === 'access' && <AccessSection />}
           {section === 'display' && <DisplayPanel config={config} onConfig={onConfig} />}
           {section === 'remote' && <RemoteSection />}
@@ -202,6 +203,7 @@ function About({ onRerunSetup }: { onRerunSetup: () => void }) {
       <div className="flex flex-col gap-2">
         <Row icon={RotateCcw} title="Run setup again" sub="Name, time zone, network, output, music sources" onClick={onRerunSetup} />
       </div>
+      <ResetSection />
       <Diagnostics />
     </div>
   )
@@ -267,6 +269,90 @@ function RemoteSection() {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+const RESETS = {
+  settings: {
+    title: 'Reset settings',
+    sub: 'Wi-Fi, Bluetooth, network shares, sound and display choices. Your library stays.',
+    erases: ['Settings and your name', 'Saved Wi-Fi networks', 'Bluetooth pairings', 'Network shares and their passwords', 'AirPlay / Spotify name'],
+    keeps: ['All music and drives', 'The library (no rescan needed)', 'The installed version and updates'],
+  },
+  everything: {
+    title: 'Erase everything',
+    sub: 'Like new: settings plus the music copied onto this device and the library.',
+    erases: ['Everything in "Reset settings"', 'Music copied onto this device (local folder)', 'The library index (scanned again)', 'Playback history and queue'],
+    keeps: ['Music on USB drives, other disks and network shares', 'The installed version and updates'],
+  },
+} as const
+
+/** Settings > About: reset settings, or everything, then restart into setup. */
+function ResetSection() {
+  const [confirm, setConfirm] = useState<keyof typeof RESETS | null>(null)
+  const [busy, setBusy] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useRemote((k) => {
+    if (confirm && k === 'back') {
+      sfx.back()
+      setConfirm(null)
+      return true
+    }
+    return false
+  }, confirm !== null)
+  const opened = useRef(false)
+  useEffect(() => {
+    // move focus only when the confirm screen opens/closes, never when About is first shown
+    if (!opened.current) {
+      opened.current = true
+      return
+    }
+    setTimeout(() => focusFirst(ref.current), 60)
+  }, [confirm])
+
+  if (busy) {
+    return <div className="rounded-[1.1rem] bg-white/[0.05] px-6 py-5 text-[1.05rem]">Resetting… musicos restarts in a moment.</div>
+  }
+  if (confirm) {
+    const r = RESETS[confirm]
+    return (
+      <div ref={ref} className="flex flex-col gap-3">
+        <div className="rounded-[1.1rem] bg-white/[0.05] px-6 py-5">
+          <div className="flex items-center gap-3 text-[1.25rem] font-semibold">
+            <AlertTriangle className="size-[1.5rem]" strokeWidth={1.75} />
+            {r.title}?
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-8 text-[0.9rem]">
+            <div>
+              <div className="mb-1.5 text-white/40">Deleted</div>
+              {r.erases.map((x) => <div key={x} className="text-white/80">{x}</div>)}
+            </div>
+            <div>
+              <div className="mb-1.5 text-white/40">Kept</div>
+              {r.keeps.map((x) => <div key={x} className="text-white/60">{x}</div>)}
+            </div>
+          </div>
+        </div>
+        <Row icon={X} title="Cancel" autoFocus onClick={() => (sfx.back(), setConfirm(null))} />
+        <Row
+          icon={Eraser}
+          title={`${r.title} and restart`}
+          onClick={async () => {
+            sfx.select()
+            setBusy(true)
+            await api.reset(confirm).catch(() => setBusy(false))
+          }}
+        />
+      </div>
+    )
+  }
+  return (
+    <div ref={ref} className="flex flex-col gap-2">
+      <div className="eyebrow mb-1 px-1">Reset</div>
+      {(Object.keys(RESETS) as (keyof typeof RESETS)[]).map((k) => (
+        <Row key={k} icon={Eraser} title={RESETS[k].title} sub={RESETS[k].sub} onClick={() => (sfx.select(), setConfirm(k))} />
+      ))}
     </div>
   )
 }

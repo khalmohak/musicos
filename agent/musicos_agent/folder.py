@@ -113,6 +113,9 @@ class FolderClient:
         return {"artists": len({a["artist"] for a in al}), "albums": len(al),
                 "songs": sum(a["tracks"] for a in al), "updating": False}
 
+    def rescan(self):
+        self.update()
+
     def update(self):
         self._albums = None
 

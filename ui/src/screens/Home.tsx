@@ -1,7 +1,8 @@
 import { Button } from '@glyphui/ui'
-import { Power, Search, Settings as SettingsIcon, UserRound } from 'lucide-react'
+import { FolderPlus, Power, RefreshCw, Search, Settings as SettingsIcon, Unplug, UserRound } from 'lucide-react'
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Cover } from '../components/Cover'
+import { ScanCard, useScan } from '../components/ScanCard'
 import { NowPlayingBar } from '../components/NowPlayingBar'
 import { Record } from '../components/Record'
 import { PhotoBackdrop } from '../components/PhotoBackdrop'
@@ -38,7 +39,7 @@ function useClock() {
 
 export function Home({
   albums, artists, status, name, tab, focus, onTab, onFocus, onOpenAlbum, onOpenArtist, onNowPlaying, onSearch,
-  onSettings, onPower, onTransport,
+  onSettings, onSources, onPower, onTransport, active = true,
 }: {
   albums: Album[]
   artists: ArtistEntry[]
@@ -54,8 +55,12 @@ export function Home({
   onNowPlaying: () => void
   onSearch: () => void
   onSettings: () => void
+  onSources: () => void
   onPower: () => void
   onTransport: (k: Transport) => void
+  /** false while another screen is on top: Home stays rendered (covers decoded, scroll kept)
+   * but must not react to keys */
+  active?: boolean
 }) {
   const [zone, setZone] = useState<'header' | 'grid' | 'bar'>('grid')
   const [hIdx, setHIdx] = useState(0)
@@ -77,8 +82,8 @@ export function Home({
   const artist = tab === 'artists' ? artists[idx] : undefined
 
   useLayoutEffect(() => {
-    if (zone === 'grid') reveal(tiles.current[idx], { block: 'center' })
-  }, [idx, zone, tab])
+    if (zone === 'grid' && active) reveal(tiles.current[idx], { block: 'center' })
+  }, [idx, zone, tab, active])
 
   useEffect(() => {
     const file = album?.file ?? artist?.file
@@ -123,7 +128,7 @@ export function Home({
       sfx.select()
       if (album) onOpenAlbum(album)
       else if (artist) onOpenArtist(artist.artist)
-      else onSettings() // empty library: the only thing on screen is "Open settings"
+      else onSources() // empty library: the only thing on screen is "Add music"
       return true
     }
     if (k === 'back') {
@@ -143,7 +148,7 @@ export function Home({
     } else if (next === 'out-left') sfx.edge()
     else setIdx(stepTo(idx, next))
     return true
-  })
+  }, active)
 
   const empty = count === 0
   const headerClick = (i: number) => {
@@ -197,6 +202,12 @@ export function Home({
             {pill(1, 'Artists', tab === 'artists')}
           </div>
           <div className="flex items-center gap-3">
+            {status?.scan?.active && (
+              <span className="mo-fade-in mr-2 flex h-[2.2rem] items-center gap-2 rounded-full bg-white/[0.08] px-4 text-[0.85rem] font-medium tabular-nums text-white/70">
+                <RefreshCw className="mo-spin size-[0.95rem]" strokeWidth={2} />
+                {status.scan.pct !== null ? `Scanning ${status.scan.pct}%` : 'Scanning'}
+              </span>
+            )}
             <span className="mr-3 text-[1.05rem] font-medium tabular-nums text-white/70">{clock}</span>
             {iconBtn(2, Search)}
             {iconBtn(3, SettingsIcon, updateReady)}
@@ -225,17 +236,7 @@ export function Home({
 
       <div className="no-scrollbar relative flex-1 overflow-y-auto px-[4.5vw] pt-[3.5vh] pb-[18vh]">
         {empty && <PhotoBackdrop index={0} dim={0.62} />}
-        {empty && (
-          <div className="relative flex flex-col items-center gap-5 pt-[10vh] text-center">
-            <Record size="8rem" spinning={false} />
-            <div className="text-[1.6rem] font-semibold">No music yet</div>
-            <p className="max-w-[30rem] text-white/55">Plug in a drive, add a network share, or copy music in, then scan the library in Settings.</p>
-            <Button data-nav tabIndex={-1} className="bg-white! text-[rgb(12_12_14)]! scale-[1.06]" onClick={onSettings}>
-              <SettingsIcon />
-              Open settings
-            </Button>
-          </div>
-        )}
+        {empty && <EmptyLibrary onSources={onSources} />}
 
         {tab === 'albums' && (
           <div className="grid gap-x-[1.7vw] gap-y-[3.2vh]" style={{ gridTemplateColumns: `repeat(${ALBUM_COLS}, minmax(0, 1fr))` }}>
@@ -249,7 +250,13 @@ export function Home({
                 onMouseEnter={() => (setZone('grid'), setIdx(i))}
                 className={`lift relative aspect-square rounded-[0.75rem] ${zone === 'grid' && i === idx ? 'is-focused' : ''}`}
               >
-                <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.12} eager={i < ALBUM_COLS * 3} className="size-full rounded-[0.75rem] text-[0.95rem]" />
+                <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.12} eager={i < ALBUM_COLS * 3}
+                  className={`size-full rounded-[0.75rem] text-[0.95rem] transition-[opacity,filter] duration-500 ${a.offline ? 'opacity-35 grayscale' : ''}`} />
+                {a.offline && (
+                  <span className="absolute bottom-[0.6rem] left-[0.6rem] flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[0.68rem] font-medium text-white/75">
+                    <Unplug className="size-[0.8rem]" strokeWidth={2} /> Not connected
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -313,6 +320,36 @@ export function ArtistPortrait({ entry, className = '', eager }: { entry: { arti
           <UserRound className="size-1/3 text-white/25" strokeWidth={1.25} />
         </div>
       )}
+    </div>
+  )
+}
+
+/** No albums yet: either the first scan is running (show it), or there is nothing to scan. */
+function EmptyLibrary({ onSources }: { onSources: () => void }) {
+  const scan = useScan()
+  if (scan?.active) {
+    return (
+      <div className="relative mx-auto flex max-w-[44rem] flex-col gap-6 pt-[8vh]">
+        <div className="flex items-center gap-5">
+          <Record size="5rem" />
+          <div>
+            <div className="text-[1.6rem] font-semibold">Building your library</div>
+            <div className="mt-1 text-white/55">The first scan of a big drive takes a while.</div>
+          </div>
+        </div>
+        <ScanCard s={scan} compact />
+      </div>
+    )
+  }
+  return (
+    <div className="relative flex flex-col items-center gap-5 pt-[10vh] text-center">
+      <Record size="8rem" spinning={false} />
+      <div className="text-[1.6rem] font-semibold">No music yet</div>
+      <p className="max-w-[30rem] text-white/55">Add folders from a drive, a network share or this device. Your library is built from the folders you choose.</p>
+      <Button data-nav tabIndex={-1} className="bg-white! text-[rgb(12_12_14)]! scale-[1.06]" onClick={onSources}>
+        <FolderPlus />
+        Add music
+      </Button>
     </div>
   )
 }

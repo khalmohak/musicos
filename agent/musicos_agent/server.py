@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 import time as _time
 
-from . import config, device, installer, receivers, system, updates
+from . import config, device, installer, library, netshare, receivers, scan, system, updates
 from .mpd import MPDError
 
 try:
@@ -130,8 +130,13 @@ class Covers:
         return data
 
     def _folder_image(self, uri):
-        d = os.path.realpath(os.path.join(self.root, os.path.dirname(uri)))
-        if not d.startswith(self.root + os.sep) or not os.path.isdir(d):
+        rel = os.path.normpath(os.path.dirname(uri))
+        if rel.startswith("..") or os.path.isabs(rel):
+            return None
+        d = os.path.realpath(os.path.join(self.root, rel))
+        # library folders are symlinks into the music sources: allow both trees
+        allowed = (self.root + os.sep, os.path.realpath(library.MUSIC_ROOT) + os.sep)
+        if not d.startswith(allowed) or not os.path.isdir(d):
             return None
         try:
             names = os.listdir(d)
@@ -359,7 +364,11 @@ def make_handler(client, ui_dir, covers, port):
                 if p == "/api/status":
                     st = client.status()
                     st["receiver"] = receivers.status()
+                    sc = scan.STATE
+                    st["scan"] = {"active": sc["active"], "pct": sc["pct"], "phase": sc["phase"]} if sc["active"] else None
                     return self._send(200, st)
+                if p == "/api/scan":
+                    return self._send(200, scan.status())
                 if p == "/api/receiver/cover":
                     data = receivers.COVER["data"]
                     if not data:
@@ -386,7 +395,18 @@ def make_handler(client, ui_dir, covers, port):
                 if p == "/api/albums":
                     if "artist" in q:
                         return self._send(200, client.albums(q["artist"]))
-                    return self._send(200, client.all_albums())
+                    albums = client.all_albums()
+                    if LIBRARY_MODE:
+                        hidden, offline = library.hidden_folders(), library.offline_folders()
+                        albums = [dict(a, offline=True) if library.folder_of(a["file"]) in offline else a
+                                  for a in albums if library.folder_of(a["file"]) not in hidden]
+                    return self._send(200, albums)
+                if p == "/api/library":
+                    return self._send(200, library.overview(client if LIBRARY_MODE else None))
+                if p == "/api/net/discover":
+                    return self._send(200, netshare.discover())
+                if p == "/api/library/browse":
+                    return self._send(200, library.browse(q.get("source", ""), q.get("path", "")))
                 if p == "/api/tracks":
                     return self._send(200, client.tracks(q.get("artist", ""), q.get("album", "")))
                 if p == "/api/art":
@@ -499,8 +519,35 @@ def make_handler(client, ui_dir, covers, port):
                 elif p == "/api/volume":
                     client.set_volume(b["volume"])
                 elif p == "/api/update":
-                    client.update()
+                    full = bool(b.get("full"))  # re-read every file's tags, not just new/changed
+                    if LIBRARY_MODE:
+                        library.scan_all(client, full)  # connected folders only
+                    elif full:
+                        client.rescan()
+                    else:
+                        client.update()
                     return self._send(200, client.stats())
+                elif p == "/api/net/shares":
+                    return self._send(200, netshare.shares(b.get("protocol", "smb"), b["server"], b.get("username", ""), b.get("password", "")))
+                elif p == "/api/net/test":
+                    return self._send(200, netshare.test(b.get("protocol", "smb"), b["server"], b.get("share", ""), b.get("path", ""),
+                                                         b.get("username", ""), b.get("password", "")))
+                elif p == "/api/sources/nfs":
+                    return self._send(200, {"id": config.add_nfs(b.get("name", ""), b["server"], b["share"], b.get("path", ""))})
+                elif p == "/api/library/add":
+                    return self._send(200, library.add_folder(b["source"], b.get("path", ""), client if LIBRARY_MODE else None))
+                elif p == "/api/library/remove":
+                    return self._send(200, library.remove_folder(b["id"], client if LIBRARY_MODE else None))
+                elif p == "/api/library/enable":
+                    return self._send(200, library.set_enabled(b["id"], b.get("on", True)))
+                elif p == "/api/library/ignore":
+                    return self._send(200, library.ignore_drive(b["source"]))
+                elif p == "/api/library/scan":
+                    fid = b["id"]
+                    if not any(f["id"] == fid for f in library.folders() or []):
+                        raise ValueError("no such folder")
+                    (client.rescan if b.get("full") else client.update)(fid)
+                    return self._send(200, {"ok": True})
                 elif p == "/api/config":
                     return self._send(200, config.update(b))
                 elif p == "/api/audio/output":
@@ -529,6 +576,13 @@ def make_handler(client, ui_dir, covers, port):
                     return self._send(200, updates.from_usb(b["path"]))
                 elif p == "/api/update/install":
                     return self._send(200, updates.install())
+                elif p == "/api/reset":
+                    mode = b.get("mode")
+                    if mode not in ("settings", "everything"):
+                        raise ValueError("mode must be settings or everything")
+                    with open(os.path.join(config.state_dir(), "reset-request"), "w") as fh:
+                        fh.write(mode)
+                    return self._send(200, {"ok": True})
                 elif p == "/api/install":
                     return self._send(200, installer.request(b["path"], b.get("serial", ""), b["size"]))
                 elif p == "/api/update/discard":
@@ -620,14 +674,22 @@ def watch_sources(client, root):
     threading.Thread(target=loop, daemon=True).start()
 
 
+LIBRARY_MODE = False  # MPD backend: the library is a set of chosen folders (library.py)
+
+
 def serve(client, ui_dir, host, port, music_root):
-    covers = Covers(client, music_root)
+    global LIBRARY_MODE
     if type(client).__name__ == "MPDClient":
-        watch_sources(client, os.path.realpath(music_root))
+        LIBRARY_MODE = True
+        music_root = library.lib_dir()  # MPD's music_directory
+        library.migrate(client)
+        library.monitor(client)
+    covers = Covers(client, music_root)
     auto_sleep(client)
     receivers.start()
     if type(client).__name__ == "MPDClient":
         threading.Thread(target=updates.auto_check, daemon=True).start()
+        scan.start(client, os.path.realpath(music_root))
     httpd = ThreadingHTTPServer((host, port), make_handler(client, ui_dir, covers, port))
     print("musicos-agent on http://%s:%d (ui: %s, music: %s, backend: %s)"
           % (host, port, ui_dir, music_root, type(client).__name__), flush=True)

@@ -76,6 +76,9 @@ class MockClient:
         from .mpd import group_search
         return group_search(q, [], self.all_albums())
 
+    def rescan(self):
+        self.update()
+
     def update(self):
         pass
 

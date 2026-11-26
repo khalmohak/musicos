@@ -17,7 +17,12 @@ export function InstallPanel() {
     const t = setInterval(load, 2000)
     return () => clearInterval(t)
   }, [])
+  const opened = useRef(false)
   useEffect(() => {
+    if (!opened.current) {
+      opened.current = true // first render: leave focus where it is
+      return
+    }
     setTimeout(() => focusFirst(ref.current), 60)
   }, [confirm])
   useRemote((k) => {

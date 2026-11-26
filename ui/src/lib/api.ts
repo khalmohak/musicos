@@ -13,6 +13,8 @@ export interface Album {
   tracks: number
   codec?: string
   format?: AudioFormat | null
+  /** its drive or share isn't connected: shown greyed out */
+  offline?: boolean
 }
 export interface Track {
   file: string
@@ -41,6 +43,7 @@ export interface Status {
   queueLength?: number
   song: Song | null
   receiver?: Receiver | null
+  scan?: { active: boolean; pct: number | null; phase: string } | null
 }
 export interface Receiver {
   active: boolean
@@ -181,6 +184,82 @@ export interface Stats {
   songs: number
   updating: boolean
 }
+export interface LibraryFolder {
+  id: string
+  source: string
+  path: string
+  name: string
+  sourceName: string
+  sourceKind: 'local' | 'usb' | 'disk' | 'network'
+  enabled: boolean
+  online: boolean
+  sourceOnline: boolean
+  albums: number
+  tracks: number
+  seconds: number
+}
+export interface LibSource {
+  id: string
+  kind: 'local' | 'usb' | 'disk' | 'network'
+  name: string
+  online: boolean
+  mount: string
+  server?: string
+  share?: string
+  protocol?: 'smb' | 'nfs'
+}
+export interface LibraryOverview {
+  folders: LibraryFolder[]
+  sources: LibSource[]
+  newDrives: { id: string; name: string; kind: string; size: number; mount: string }[]
+}
+export interface BrowseResult {
+  source: string
+  path: string
+  folders: { name: string; path: string; audio: number; complete: boolean }[]
+  audioHere: number
+  included: string[]
+}
+export interface NetServer {
+  name: string
+  host: string
+  address: string
+  protocols: ('smb' | 'nfs')[]
+}
+export interface NetTestStep {
+  id: string
+  ok: boolean | null
+  title: string
+  detail: string
+}
+export interface NetLogin {
+  protocol: 'smb' | 'nfs'
+  server: string
+  share?: string
+  path?: string
+  username?: string
+  password?: string
+}
+export interface ScanStatus {
+  active: boolean
+  phase: 'idle' | 'counting' | 'reading'
+  found: number
+  counted: boolean
+  songs: number
+  total: number
+  done: number
+  added: number
+  updated: number
+  removed: number
+  current: string
+  source: string
+  rate: number
+  eta: number | null
+  pct: number | null
+  started: number
+  errors: string[]
+  last: { at: number; seconds: number; added: number; updated: number; removed: number; errors: number; songs: number; albums: number } | null
+}
 export interface AudioOutput {
   id: string
   name: string
@@ -244,7 +323,8 @@ export const api = {
   config: () => req<Config>('/api/config'),
   saveConfig: (c: Partial<Config>) => req<Config>('/api/config', c),
   stats: () => req<Stats>('/api/stats'),
-  rescan: () => req<Stats>('/api/update', {}),
+  rescan: (full = false) => req<Stats>('/api/update', full ? { full: true } : {}),
+  scan: () => req<ScanStatus>('/api/scan'),
   albums: () => req<Album[]>('/api/albums'),
   tracks: (a: Album) => req<Track[]>(`/api/tracks?artist=${q(a.artist)}&album=${q(a.album)}`),
   play: (a: Album, pos = 0) => req<Status>('/api/play', { artist: a.artist, album: a.album, pos }),
@@ -281,6 +361,7 @@ export const api = {
   checkUpdate: (url?: string) => req<{ upToDate: boolean; version: string }>('/api/update/check', url ? { url } : {}),
   updateFromUsb: (path: string) => req<{ version: string }>('/api/update/usb', { path }),
   installUpdate: () => req<{ ok: boolean }>('/api/update/install', {}),
+  reset: (mode: 'settings' | 'everything') => req<{ ok: boolean }>('/api/reset', { mode }),
   installInfo: () => req<InstallInfo>('/api/install'),
   installTo: (d: InstallDisk) => req<{ ok: boolean }>('/api/install', { path: d.path, serial: d.serial, size: d.size }),
   report: () => req<{ text: string; at: number }>('/api/report'),
@@ -298,6 +379,17 @@ export const api = {
   addShare: (s: { name: string; server: string; share: string; path: string; username: string; password: string }) =>
     req<{ id: string }>('/api/sources/smb', s),
   removeSource: (id: string) => req<{ ok: boolean }>('/api/sources/remove', { id }),
+  library: () => req<LibraryOverview>('/api/library'),
+  libraryBrowse: (source: string, path = '') => req<BrowseResult>(`/api/library/browse?source=${q(source)}&path=${q(path)}`),
+  libraryAdd: (source: string, path: string) => req<LibraryFolder>('/api/library/add', { source, path }),
+  libraryRemove: (id: string) => req<{ ok: boolean }>('/api/library/remove', { id }),
+  libraryEnable: (id: string, on: boolean) => req<{ ok: boolean }>('/api/library/enable', { id, on }),
+  libraryIgnore: (source: string) => req<{ ok: boolean }>('/api/library/ignore', { source }),
+  libraryScan: (id: string, full = false) => req<{ ok: boolean }>('/api/library/scan', { id, full }),
+  netDiscover: () => req<NetServer[]>('/api/net/discover'),
+  netShares: (l: NetLogin) => req<{ name: string; comment: string }[]>('/api/net/shares', l),
+  netTest: (l: NetLogin) => req<{ ok: boolean; steps: NetTestStep[]; audio?: number }>('/api/net/test', l),
+  addNfs: (s: { name: string; server: string; share: string; path?: string }) => req<{ id: string }>('/api/sources/nfs', s),
 }
 
 /**

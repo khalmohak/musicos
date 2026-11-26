@@ -1,18 +1,18 @@
-import { Progress } from '@glyphui/ui'
 import QRCode from 'qrcode'
 import {
-  Airplay, AudioLines, Bell, BellOff, Bluetooth, Download, Info, Radio, RotateCcw, Check, EthernetPort, EyeOff, FolderOpen, Gamepad2, Globe, HardDrive, Headphones,
+  Airplay, AudioLines, Bell, BellOff, Bluetooth, Download, Info, Radio, RotateCcw, Check, EthernetPort, EyeOff, FolderOpen, Gamepad2, Globe, Headphones,
   ImageDown, Keyboard, Lock, Monitor, MonitorPlay, Moon, RefreshCw, Scan, Server, Smartphone, Speaker, Tv, TvMinimal, Usb,
-  Waypoints, Wifi, WifiHigh, WifiLow, WifiOff, WifiZero, ZoomIn,
+  Tags, Waypoints, Wifi, WifiHigh, WifiLow, WifiOff, WifiZero, ZoomIn,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import {
   type Access, type AudioOutput, type BtDevice, type BtState, type Config, type Connection, type DisplayInfo, type Network,
-  type ReceiversInfo, type Source, type Stats, type UpdateStatus, type WifiNetwork, api, fmtBytes,
+  type LibraryOverview, type ReceiversInfo, type Stats, type UpdateStatus, type WifiNetwork, api,
 } from '../lib/api'
 import { focusFirst, useRemote } from '../lib/keys'
 import { configureSounds, sfx } from '../lib/sounds'
 import { OnScreenKeyboard } from './OnScreenKeyboard'
+import { ScanCard, useScan } from './ScanCard'
 import { Row, Toggle } from './ui'
 
 function Section({ title, children }: { title?: string; children: ReactNode }) {
@@ -207,61 +207,67 @@ export function SoundPanel({ config, onConfig }: { config: Config; onConfig: (c:
 }
 
 // ---------------------------------------------------------------- library
-const SOURCE_ICON: Record<Source['kind'], typeof Tv> = {
-  local: HardDrive, disk: HardDrive, usb: Usb, network: Server, folder: FolderOpen,
-}
 
-export function LibraryPanel() {
-  const [sources, setSources] = useState<Source[]>([])
+export function LibraryPanel({ onSources }: { onSources: () => void }) {
+  const [lib, setLib] = useState<LibraryOverview | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [scanning, setScanning] = useState(false)
 
   useEffect(() => {
     let alive = true
     const tick = async () => {
-      const [s, st] = await Promise.all([api.sources().catch(() => []), api.stats().catch(() => null)])
+      const [l, st] = await Promise.all([api.library().catch(() => null), api.stats().catch(() => null)])
       if (!alive) return
-      setSources(s)
+      setLib(l)
       setStats(st)
       if (st && !st.updating) setScanning(false)
     }
     tick()
-    const t = setInterval(tick, 2000)
+    const t = setInterval(tick, 3000)
     return () => {
       alive = false
       clearInterval(t)
     }
   }, [])
 
-  const busy = scanning || !!stats?.updating
+  const scan = useScan()
+  const busy = scanning || !!stats?.updating || !!scan?.active
+  const off = lib?.folders.filter((f) => !f.online).length ?? 0
   return (
     <div className="flex flex-col gap-10">
       <Section title="Sources">
-        <div className="no-scrollbar flex max-h-[28vh] flex-col gap-2 overflow-y-auto p-1">
-          {sources.map((s) => (
-            <Row
-              key={s.id}
-              icon={SOURCE_ICON[s.kind]}
-              title={s.name}
-              sub={s.mounted ? (s.total ? `${fmtBytes(s.free)} free of ${fmtBytes(s.total)}` : 'Connected') : 'Waiting for drive'}
-              trailing={s.mounted ? <Check className="size-5" /> : null}
-            />
-          ))}
-        </div>
-        <Note>USB drives and extra internal drives show up here on their own.</Note>
+        <Row
+          icon={FolderOpen}
+          title="Music sources"
+          sub={lib
+            ? `${lib.folders.length} ${lib.folders.length === 1 ? 'folder' : 'folders'} from ${new Set(lib.folders.map((f) => f.source)).size} ${new Set(lib.folders.map((f) => f.source)).size === 1 ? 'source' : 'sources'}${off ? ` · ${off} not connected` : ''} · add drives, shares and folders`
+            : 'Drives, network shares and folders'}
+          trailing={lib?.newDrives.length ? <span className="rounded-full bg-white px-2.5 py-0.5 text-[0.72rem] font-semibold text-[rgb(12_12_14)]">New drive</span> : undefined}
+          onClick={() => (sfx.select(), onSources())}
+        />
       </Section>
       <Section title="Library">
+        <ScanCard s={scan} />
         <Row
           icon={(p: { className?: string; strokeWidth?: number }) => <RefreshCw {...p} className={`${p.className} ${busy ? 'mo-spin' : ''}`} />}
           title={busy ? 'Scanning…' : 'Scan for new music'}
-          sub={stats ? `${stats.albums.toLocaleString()} albums · ${stats.songs.toLocaleString()} tracks` : '—'}
+          sub={stats ? `${stats.albums.toLocaleString()} albums · ${stats.songs.toLocaleString()} tracks · finds new and changed files` : '—'}
           onClick={async () => {
             sfx.select()
             setScanning(true)
             await api.rescan().catch(() => {})
           }}
         />
-        {busy && <Progress className="px-1" value={null} />}
+        <Row
+          icon={Tags}
+          title="Re-read all tags"
+          sub="After editing tags or cover art on a computer. Slower: reads every file again."
+          onClick={async () => {
+            sfx.select()
+            setScanning(true)
+            await api.rescan(true).catch(() => {})
+          }}
+        />
       </Section>
     </div>
   )

@@ -2,7 +2,19 @@
 # Reboot if this boot is a counted trial of a new version (systemd-boot sets LoaderBootCountPath),
 # so a bad update rolls back on its own. On a known-good version: do nothing (no reboot loops).
 var=/sys/firmware/efi/efivars/LoaderBootCountPath-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
-[ -e "$var" ] || exit 0
+if [ ! -e "$var" ]; then
+    # a known-good version that fails to start: say what to do (no one has a root password)
+    cat > /dev/console 2>/dev/null <<'MSG'
+
+  musicos could not start.
+
+  Your music drives are not affected. To fix it:
+    1. Restart. Damaged files on the internal disk are repaired automatically at boot.
+    2. Still stuck? Start from the musicos USB stick and use
+       Settings > Updates & install > Install on this computer.
+MSG
+    exit 0
+fi
 echo "musicos: $1 on a trial boot; restarting to try again or go back to the previous version" > /dev/console 2>/dev/null
 echo "musicos: $1 on a trial boot; restarting"
 sleep 5

@@ -1,0 +1,5 @@
+[Unit]
+Description=Reset musicos when the UI asks
+
+[Path]
+PathChanged=/var/lib/musicos/reset-request
