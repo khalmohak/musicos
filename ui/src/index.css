@@ -304,10 +304,10 @@ body.mo-pointer button {
 .mo-text-out { animation: mo-text-out 200ms ease-in both; }
 /* album tiles within a row of the focus already have their GPU layer, so landing on one
    doesn't create (and flash) a new layer */
-.lift-near { will-change: transform; }
-/* the focus shadow gets its own layer too: fading a big blurred shadow that is painted into
-   the tile repaints the whole tile on every frame */
-.lift-near::after { will-change: opacity; }
+/* wall tiles: only ~40 exist at a time (VirtualWall), so each keeps its GPU layer for good;
+   focus then only changes a transform. No per-tile shadow: the wall has one shared shadow. */
+.wall-tile { will-change: transform; }
+.lift-flat::after { display: none; }
 
 /* Now Playing pill: three bars bouncing while music plays (transform only, cheap) */
 @keyframes mo-eq {

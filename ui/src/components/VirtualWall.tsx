@@ -9,12 +9,13 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 're
  */
 export function VirtualWall({
   count, cols, idx, keyOf, renderItem, colGapVw, rowGapVh, padXVw, padTopVh, padBottomVh, extraRem = 0, onWheelRows,
+  focused = true, round = false,
 }: {
   count: number
   cols: number
   idx: number
   keyOf: (i: number) => string
-  renderItem: (i: number, near: boolean) => ReactNode
+  renderItem: (i: number) => ReactNode
   colGapVw: number
   rowGapVh: number
   padXVw: number
@@ -23,6 +24,10 @@ export function VirtualWall({
   /** extra height under each square tile (e.g. a name), in rem */
   extraRem?: number
   onWheelRows?: (rows: number) => void
+  /** show the focus shadow (false while focus is in the header) */
+  focused?: boolean
+  /** circular tiles (artists) */
+  round?: boolean
 }) {
   const box = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0, vw: 0, vh: 0, rem: 16 })
@@ -82,7 +87,7 @@ export function VirtualWall({
         if (i >= count) break
         items.push(
           <div key={keyOf(i)} className="absolute" style={{ left: padX + c * (tileW + colGap), top: padTop + r * rowH, width: tileW, height: tileH }}>
-            {renderItem(i, Math.abs(r - focusRow) <= 1)}
+            {renderItem(i)}
           </div>,
         )
       }
@@ -94,6 +99,21 @@ export function VirtualWall({
         className="relative will-change-transform"
         style={{ height: contentH, transform: `translate3d(0, ${-offset}px, 0)`, transition: 'transform 460ms cubic-bezier(0.22, 0.8, 0.2, 1)' }}
       >
+        {/* one shared focus shadow that glides to the focused tile: a blurred shadow per tile,
+            faded in and out on every move, was expensive to paint */}
+        {size.w > 0 && count > 0 && (
+          <div
+            aria-hidden
+            className={`pointer-events-none absolute top-0 left-0 will-change-transform ${round ? 'rounded-full' : 'rounded-[0.75rem]'}`}
+            style={{
+              width: tileW, height: tileW,
+              boxShadow: '0 1.8rem 3.2rem -1rem rgb(0 0 0 / 0.85)',
+              opacity: focused ? 1 : 0,
+              transform: `translate3d(${padX + (idx % cols) * (tileW + colGap)}px, ${padTop + focusRow * rowH}px, 0) scale(1.08)`,
+              transition: 'transform 320ms cubic-bezier(0.22, 0.8, 0.2, 1), opacity 200ms ease',
+            }}
+          />
+        )}
         {items}
       </div>
     </div>

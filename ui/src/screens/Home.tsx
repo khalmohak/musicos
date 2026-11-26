@@ -10,7 +10,6 @@ import { Record } from '../components/Record'
 import { PhotoBackdrop } from '../components/PhotoBackdrop'
 import { FormatBadges } from '../components/ui'
 import { type Album, type ArtistEntry, type Status, albumKey, api, artistArtUrl, coverUrl } from '../lib/api'
-import { setAccentFrom } from '../lib/color'
 import { gridMove, stepTo } from '../lib/grid'
 import { useRemote } from '../lib/keys'
 import { sfx } from '../lib/sounds'
@@ -87,7 +86,7 @@ export function Home({
 
   useEffect(() => {
     const file = album?.file ?? artist?.file
-    if (file) setAccentFrom(coverUrl(file, 0.05), 700)
+    void file // Home keeps a fixed glow: re-colouring it repainted the whole screen after each move
   }, [album, artist])
 
   const setIdx = (i: number) => onFocus(tab, i)
@@ -338,6 +337,38 @@ type WallAct = { open: (a: Album) => void; openArtist: (artist: string) => void;
 
 /** The album wall. Memoised on (albums, focus): status updates every second while music plays
  * and must not re-render it. Only rows near the view exist; moving slides one GPU layer. */
+/** One album tile. Memoised: moving focus re-renders only the two tiles whose state changed. */
+const AlbumTile = memo(function AlbumTile({ a, i, on, act }: { a: Album; i: number; on: boolean; act: MutableRefObject<WallAct> }) {
+  return (
+    <div
+      onClick={() => (sfx.select(), act.current.open(a))}
+      onMouseEnter={() => act.current.hover(i)}
+      className={`lift lift-flat wall-tile relative size-full rounded-[0.75rem] ${on ? 'is-focused' : ''}`}
+    >
+      <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.12} eager
+        className={`size-full rounded-[0.75rem] text-[0.95rem] ${a.offline ? 'opacity-35 grayscale' : ''}`} />
+      {a.offline && (
+        <span className="absolute bottom-[0.6rem] left-[0.6rem] flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[0.68rem] font-medium text-white/75">
+          <Unplug className="size-[0.8rem]" strokeWidth={2} /> Not connected
+        </span>
+      )}
+    </div>
+  )
+})
+
+const ArtistTile = memo(function ArtistTile({ a, i, on, act }: { a: ArtistEntry; i: number; on: boolean; act: MutableRefObject<WallAct> }) {
+  return (
+    <div onClick={() => (sfx.select(), act.current.openArtist(a.artist))} onMouseEnter={() => act.current.hover(i)} className="flex flex-col items-center gap-3">
+      <div className={`lift lift-flat wall-tile relative aspect-square w-full rounded-full ${on ? 'is-focused' : ''}`}>
+        <ArtistPortrait entry={a} className="size-full rounded-full" eager />
+      </div>
+      <div className={`w-full truncate text-center text-[0.95rem] transition-colors ${on ? 'text-white' : 'text-white/55'}`}>{a.artist}</div>
+    </div>
+  )
+})
+
+/** The album wall. Memoised on (albums, focus): status updates every second while music plays
+ * and must not re-render it. Only rows near the view exist; moving slides one GPU layer. */
 const AlbumWall = memo(function AlbumWall({ albums, idx, focused, act }: {
   albums: Album[]
   idx: number
@@ -346,27 +377,10 @@ const AlbumWall = memo(function AlbumWall({ albums, idx, focused, act }: {
 }) {
   return (
     <VirtualWall
-      count={albums.length} cols={ALBUM_COLS} idx={idx} keyOf={(i) => albumKey(albums[i])}
+      count={albums.length} cols={ALBUM_COLS} idx={idx} keyOf={(i) => albumKey(albums[i])} focused={focused}
       colGapVw={1.7} rowGapVh={3.2} padXVw={4.5} padTopVh={3.5} padBottomVh={18}
       onWheelRows={(n) => act.current.wheel(n)}
-      renderItem={(i, near) => {
-        const a = albums[i]
-        return (
-          <div
-            onClick={() => (sfx.select(), act.current.open(a))}
-            onMouseEnter={() => act.current.hover(i)}
-            className={`lift relative size-full rounded-[0.75rem] ${focused && i === idx ? 'is-focused' : ''} ${near ? 'lift-near' : ''}`}
-          >
-            <Cover file={a.file} title={a.album} artist={a.artist} fraction={0.12} eager
-              className={`size-full rounded-[0.75rem] text-[0.95rem] ${a.offline ? 'opacity-35 grayscale' : ''}`} />
-            {a.offline && (
-              <span className="absolute bottom-[0.6rem] left-[0.6rem] flex items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[0.68rem] font-medium text-white/75">
-                <Unplug className="size-[0.8rem]" strokeWidth={2} /> Not connected
-              </span>
-            )}
-          </div>
-        )
-      }}
+      renderItem={(i) => <AlbumTile a={albums[i]} i={i} on={focused && i === idx} act={act} />}
     />
   )
 })
@@ -379,21 +393,10 @@ const ArtistWall = memo(function ArtistWall({ artists, idx, focused, act }: {
 }) {
   return (
     <VirtualWall
-      count={artists.length} cols={ARTIST_COLS} idx={idx} keyOf={(i) => artists[i].artist}
+      count={artists.length} cols={ARTIST_COLS} idx={idx} keyOf={(i) => artists[i].artist} focused={focused} round
       colGapVw={2.6} rowGapVh={4} padXVw={4.5} padTopVh={3.5} padBottomVh={18} extraRem={2.3}
       onWheelRows={(n) => act.current.wheel(n)}
-      renderItem={(i, near) => {
-        const a = artists[i]
-        const on = focused && i === idx
-        return (
-          <div onClick={() => (sfx.select(), act.current.openArtist(a.artist))} onMouseEnter={() => act.current.hover(i)} className="flex flex-col items-center gap-3">
-            <div className={`lift relative aspect-square w-full rounded-full ${on ? 'is-focused' : ''} ${near ? 'lift-near' : ''}`}>
-              <ArtistPortrait entry={a} className="size-full rounded-full" eager />
-            </div>
-            <div className={`w-full truncate text-center text-[0.95rem] transition-colors ${on ? 'text-white' : 'text-white/55'}`}>{a.artist}</div>
-          </div>
-        )
-      }}
+      renderItem={(i) => <ArtistTile a={artists[i]} i={i} on={focused && i === idx} act={act} />}
     />
   )
 })
