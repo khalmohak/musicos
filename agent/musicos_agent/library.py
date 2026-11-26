@@ -81,6 +81,22 @@ def _mounts():
     return out
 
 
+_tran_cache = {}
+
+
+def _transport(dev):
+    """usb / sata / nvme for the disk holding a partition (USB-SATA adapters often don't say usb
+    to udev's ID_BUS, but lsblk's TRAN on the parent disk does)."""
+    if dev not in _tran_cache:
+        try:
+            parent = subprocess.run(["lsblk", "-ndo", "PKNAME", dev], capture_output=True, text=True, timeout=5).stdout.strip()
+            tran = subprocess.run(["lsblk", "-ndo", "TRAN", "/dev/" + parent], capture_output=True, text=True, timeout=5).stdout.strip() if parent else ""
+        except (OSError, subprocess.SubprocessError):
+            tran = ""
+        _tran_cache[dev] = tran
+    return _tran_cache[dev]
+
+
 def sources():
     """Every place music can come from right now (connected or remembered)."""
     out = [{"id": "local", "kind": "local", "name": "This device", "online": True,
@@ -88,7 +104,8 @@ def sources():
     for mnt, m in sorted(_mounts().items()):
         name = os.path.basename(mnt)
         if name.startswith(("usb-", "disk-")) and m["uuid"]:
-            out.append({"id": "drive:" + m["uuid"], "kind": "usb" if name.startswith("usb-") else "disk",
+            usb = name.startswith("usb-") or _transport(m["source"]) == "usb"
+            out.append({"id": "drive:" + m["uuid"], "kind": "usb" if usb else "disk",
                         "name": name.split("-", 1)[1].replace("_", " "), "online": True, "mount": mnt,
                         "fstype": m["fstype"]})
     for s in config.sources():
@@ -268,6 +285,10 @@ def migrate(client=None):
         _save([])
     added = []
     for s in sources():
+        # network shares are automounted: touch them (with a time limit) before deciding
+        # they're offline, or a share that just hasn't been opened yet would be skipped
+        if s["kind"] == "network" and not s["online"]:
+            s["online"] = _reachable(s["mount"], timeout=15)
         if s["online"] and os.path.isdir(s["mount"]):
             try:
                 added.append(add_folder(s["id"], "", client=None))

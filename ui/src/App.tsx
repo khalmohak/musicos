@@ -14,6 +14,7 @@ import { Screensaver } from './screens/Screensaver'
 import { SearchView } from './screens/SearchView'
 import { Settings } from './screens/Settings'
 import { SourcesView } from './screens/SourcesView'
+import { NewDriveDialog } from './components/NewDriveDialog'
 import { Setup } from './screens/Setup'
 
 type Screen =
@@ -25,7 +26,7 @@ type Screen =
   | { kind: 'queue' }
   | { kind: 'search' }
   | { kind: 'settings' }
-  | { kind: 'sources' }
+  | { kind: 'sources'; pick?: string }
 
 type Transport = 'playpause' | 'next' | 'prev' | 'volup' | 'voldown'
 const MIN_BOOT_MS = 1800
@@ -288,9 +289,11 @@ export function App() {
       {config && screen?.kind === 'settings' && (
         <Settings config={config} onConfig={setConfig} onBack={pop} onRerunSetup={() => setStack([{ kind: 'setup' }])} onSources={() => open({ kind: 'sources' })} />
       )}
-      {screen?.kind === 'sources' && <SourcesView onBack={pop} />}
+      {screen?.kind === 'sources' && <SourcesView onBack={pop} pick={screen.pick} />}
       </div>
       )}
+      <NewDriveDialog enabled={!!config?.setupComplete && screen?.kind !== 'setup' && !idle}
+        onChoose={(id) => (screen?.kind === 'sources' ? setStack((st) => [...st.slice(0, -1), { kind: 'sources', pick: id }]) : push({ kind: 'sources', pick: id }))} />
       {power && <PowerMenu onClose={() => setPower(false)} />}
       {screen?.kind !== 'setup' && <VolumeOsd volume={status?.volume} />}
       {idle && <Screensaver status={status} albums={albums} />}

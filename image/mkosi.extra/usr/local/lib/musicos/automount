@@ -47,6 +47,8 @@ fi
 
 prefix=disk
 [ "${ID_BUS:-}" = "usb" ] && prefix=usb
+# USB-SATA adapters often report ID_BUS=ata; the parent disk's transport says usb
+[ "$(lsblk -ndo TRAN "/dev/$this_disk" 2>/dev/null)" = usb ] && prefix=usb
 name=$(printf '%s' "${ID_FS_LABEL:-${ID_FS_UUID:-drive}}" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)
 where="/srv/music/$prefix-$name"
 findmnt -rno TARGET "$where" >/dev/null 2>&1 && exit 0

@@ -29,7 +29,7 @@ type Mode =
   | { kind: 'type'; label: string; value: string; secret?: boolean; done: (v: string) => void }
 
 /** Music sources: the library is a list of folders from any drive, this device or a network share. */
-export function SourcesView({ onBack }: { onBack: () => void }) {
+export function SourcesView({ onBack, pick }: { onBack: () => void; pick?: string }) {
   const [lib, setLib] = useState<LibraryOverview | null>(null)
   const [modes, setModes] = useState<Mode[]>([{ kind: 'list' }])
   const [msg, setMsg] = useState('')
@@ -38,6 +38,15 @@ export function SourcesView({ onBack }: { onBack: () => void }) {
   const mode = modes[modes.length - 1]
 
   const load = () => api.library().then(setLib).catch(() => {})
+  // opened from the new-drive dialog: go straight to that drive's folders
+  const picked = useRef(false)
+  useEffect(() => {
+    const s = pick && lib?.sources.find((x) => x.id === pick)
+    if (s && !picked.current) {
+      picked.current = true
+      setModes([{ kind: 'list' }, { kind: 'pick', source: s, path: '' }])
+    }
+  }, [pick, lib])
   useEffect(() => {
     load()
     const t = setInterval(load, 3000)
@@ -90,7 +99,7 @@ export function SourcesView({ onBack }: { onBack: () => void }) {
         )}
       </aside>
 
-      <section ref={panel} key={modes.length + mode.kind} className="no-scrollbar mo-fade-in relative flex-1 overflow-y-auto pt-[8vh] pr-[6vw] pb-[12vh] pl-[2vw]">
+      <section ref={panel} className="no-scrollbar relative flex-1 overflow-y-auto pt-[8vh] pr-[6vw] pb-[12vh] pl-[2vw]">
         <div className="flex max-w-[52rem] flex-col gap-3">
           {mode.kind === 'list' && <ListMode lib={lib} scan={scan} onOpen={(id) => push({ kind: 'folder', id })} onAdd={() => push({ kind: 'add' })}
             onPick={(source) => push({ kind: 'pick', source, path: '' })} reload={load} setMsg={setMsg} />}
@@ -121,12 +130,16 @@ export function SourcesView({ onBack }: { onBack: () => void }) {
           {mode.kind === 'pick' && (
             <Picker source={mode.source} path={mode.path} onEnter={(p) => push({ kind: 'pick', source: mode.source, path: p })} reload={load} setMsg={setMsg} />
           )}
-          {mode.kind === 'net' && (
-            <NetWizard
-              type={(m) => push({ kind: 'type', ...m })}
-              onAdded={(source) => setModes([{ kind: 'list' }, { kind: 'pick', source, path: '' }])}
-              setMsg={setMsg}
-            />
+          {/* the wizard stays mounted while its keyboard is open, or what you type is lost */}
+          {modes.some((m) => m.kind === 'net') && (
+            <div className={mode.kind === 'net' ? 'contents' : 'hidden'}>
+              <NetWizard
+                active={mode.kind === 'net'}
+                type={(m) => push({ kind: 'type', ...m })}
+                onAdded={(source) => setModes([{ kind: 'list' }, { kind: 'pick', source, path: '' }])}
+                setMsg={setMsg}
+              />
+            </div>
           )}
           {mode.kind === 'type' && (
             <div className="flex flex-col items-center gap-5 pt-[4vh]">
@@ -338,7 +351,8 @@ function Picker({ source, path, onEnter, reload, setMsg }: { source: LibSource; 
 // ---------------------------------------------------------------- network share wizard
 type NetStep = 'server' | 'login' | 'share' | 'test' | 'adding'
 
-function NetWizard({ type, onAdded, setMsg }: {
+function NetWizard({ active, type, onAdded, setMsg }: {
+  active: boolean
   type: (m: { label: string; value: string; secret?: boolean; done: (v: string) => void }) => void
   onAdded: (s: LibSource) => void
   setMsg: (m: string) => void
@@ -355,15 +369,15 @@ function NetWizard({ type, onAdded, setMsg }: {
     api.netDiscover().then(setServers).catch(() => setServers([]))
   }, [])
   useEffect(() => {
-    setTimeout(() => focusFirst(ref.current?.closest('section') ?? null), 60)
-  }, [step])
+    if (active) setTimeout(() => focusFirst(ref.current?.closest('section') ?? null), 60)
+  }, [step, active])
   useRemote((k) => {
     // Back walks back through the wizard before leaving it
     if (k !== 'back' || step === 'server') return false
     sfx.back()
     setStep(step === 'login' ? 'server' : step === 'share' ? (login.protocol === 'nfs' ? 'server' : 'login') : step === 'test' ? 'share' : 'test')
     return true
-  })
+  }, active)
 
   const pickServer = (server: string, protocol: 'smb' | 'nfs') => {
     sfx.select()
